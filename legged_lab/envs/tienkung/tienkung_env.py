@@ -29,7 +29,7 @@ from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.sensors.camera import TiledCamera
 from isaaclab.sim import PhysxCfg, SimulationContext
 from isaaclab.utils.buffers import CircularBuffer, DelayBuffer
-from isaaclab.utils.math import quat_apply, quat_conjugate, quat_rotate
+from isaaclab.utils.math import quat_apply, quat_conjugate, quat_apply
 from scipy.spatial.transform import Rotation
 
 from legged_lab.envs.tienkung.run_cfg import TienKungRunFlatEnvCfg
@@ -44,6 +44,13 @@ from rsl_rl.utils import AMPLoaderDisplay
 
 
 class TienKungEnv(VecEnv):
+    """
+    天工机器人环境类 / TienKung Robot Environment Class
+    
+    继承自VecEnv，实现天工机器人的具体仿真环境和控制逻辑。
+    Inherits from VecEnv, implements specific simulation environment and control logic for TienKung robot.
+    """
+
     def __init__(
         self,
         cfg: (
@@ -54,6 +61,13 @@ class TienKungEnv(VecEnv):
         ),
         headless,
     ):
+        """
+        环境初始化 / Environment initialization
+        
+        Args:
+            cfg: 环境配置对象，支持多种配置类型 / Environment configuration object, supports multiple configuration types
+            headless: 是否无头模式 / Whether to run in headless mode
+        """
         self.cfg: (
             TienKungRunFlatEnvCfg
             | TienKungWalkFlatEnvCfg
@@ -124,6 +138,14 @@ class TienKungEnv(VecEnv):
             motion_files=self.cfg.amp_motion_files_display, device=self.device, time_between_frames=self.physics_dt
         )
         self.motion_len = self.amp_loader_display.trajectory_num_frames[0]
+
+    """
+    天工机器人环境实现模块 / TienKung Robot Environment Implementation Module
+    
+    该模块实现了天工机器人的强化学习环境，包含运动控制、传感器数据处理、奖励计算等功能。
+    This module implements the reinforcement learning environment for TienKung robot, 
+    including motion control, sensor data processing, reward calculation, etc.
+    """
 
     def init_buffers(self):
         self.extras = {}
@@ -307,12 +329,12 @@ class TienKungEnv(VecEnv):
         left_hand_pos = (
             self.robot.data.body_state_w[:, self.elbow_body_ids[0], :3]
             - self.robot.data.root_state_w[:, 0:3]
-            + quat_rotate(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
+            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
         )
         right_hand_pos = (
             self.robot.data.body_state_w[:, self.elbow_body_ids[1], :3]
             - self.robot.data.root_state_w[:, 0:3]
-            + quat_rotate(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
+            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
         )
         left_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), left_hand_pos)
         right_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), right_hand_pos)
@@ -575,12 +597,12 @@ class TienKungEnv(VecEnv):
         left_hand_pos = (
             self.robot.data.body_state_w[:, self.elbow_body_ids[0], :3]
             - self.robot.data.root_state_w[:, 0:3]
-            + quat_rotate(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
+            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
         )
         right_hand_pos = (
             self.robot.data.body_state_w[:, self.elbow_body_ids[1], :3]
             - self.robot.data.root_state_w[:, 0:3]
-            + quat_rotate(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
+            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
         )
         left_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), left_hand_pos)
         right_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), right_hand_pos)
