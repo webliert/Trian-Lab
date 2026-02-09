@@ -32,10 +32,10 @@ from isaaclab.utils.buffers import CircularBuffer, DelayBuffer
 from isaaclab.utils.math import quat_apply, quat_conjugate, quat_apply
 from scipy.spatial.transform import Rotation
 
-from legged_lab.envs.tienkung.run_cfg import TienKungRunFlatEnvCfg
-from legged_lab.envs.tienkung.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
-from legged_lab.envs.tienkung.walk_cfg import TienKungWalkFlatEnvCfg
-from legged_lab.envs.tienkung.walk_with_sensor_cfg import (
+from legged_lab.envs.tienkung.Experiment.run_cfg import TienKungRunFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.walk_cfg import TienKungWalkFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.walk_with_sensor_cfg import (
     TienKungWalkWithSensorFlatEnvCfg,
 )
 from legged_lab.utils.env_utils.scene import SceneCfg
@@ -366,20 +366,19 @@ class TienKungEnv(VecEnv):
 
         current_actor_obs = torch.cat(
             [
-                # root_lin_vel * self.obs_scales.lin_vel,  # 3 (已注释掉线速度)
                 ang_vel * self.obs_scales.ang_vel,  # 3
                 projected_gravity * self.obs_scales.projected_gravity,  # 3
                 command * self.obs_scales.commands,  # 3
                 joint_pos * self.obs_scales.joint_pos,  # 20
                 joint_vel * self.obs_scales.joint_vel,  # 20
                 action * self.obs_scales.actions,  # 20
-                # torch.sin(2 * torch.pi * self.gait_phase),  # 2 (已注释掉步态相位正弦值)
-                # torch.cos(2 * torch.pi * self.gait_phase),  # 2 (已注释掉步态相位余弦值)
-                # self.phase_ratio,  # 2 (已注释掉相位比例)
+                torch.sin(2 * torch.pi * self.gait_phase),  # 2
+                torch.cos(2 * torch.pi * self.gait_phase),  # 2
+                self.phase_ratio,  # 2
             ],
             dim=-1,
         )
-        current_critic_obs = torch.cat([current_actor_obs, feet_contact], dim=-1)
+        current_critic_obs = torch.cat([current_actor_obs, root_lin_vel * self.obs_scales.lin_vel, feet_contact], dim=-1)
 
         return current_actor_obs, current_critic_obs
 
@@ -525,18 +524,16 @@ class TienKungEnv(VecEnv):
             actor_obs, _ = self.compute_current_observations()
             noise_vec = torch.zeros_like(actor_obs[0])
             noise_scales = self.cfg.noise.noise_scales
-            # 注意：由于删除了线速度观测量，索引需要调整
-            # 原索引：线速度(0-2) 角速度(3-5) 投影重力(6-8) 命令(9-11) 关节位置(12-31) 关节速度(32-51) 动作(52-71) 步态相位(72-77)
-            # 新索引：角速度(0-2) 投影重力(3-5) 命令(6-8) 关节位置(9-28) 关节速度(29-48) 动作(49-68)
-            noise_vec[:3] = noise_scales.ang_vel * self.obs_scales.ang_vel  # 角速度 (原索引3-5)
-            noise_vec[3:6] = noise_scales.projected_gravity * self.obs_scales.projected_gravity  # 投影重力 (原索引6-8)
-            noise_vec[6:9] = 0  # 命令 (原索引9-11)
-            noise_vec[9 : 9 + self.num_actions] = noise_scales.joint_pos * self.obs_scales.joint_pos  # 关节位置 (原索引12-31)
-            noise_vec[9 + self.num_actions : 9 + self.num_actions * 2] = (
-                noise_scales.joint_vel * self.obs_scales.joint_vel  # 关节速度 (原索引32-51)
+            noise_vec[:3] = noise_scales.lin_vel * self.obs_scales.lin_vel
+            noise_vec[3:6] = noise_scales.ang_vel * self.obs_scales.ang_vel
+            noise_vec[6:9] = noise_scales.projected_gravity * self.obs_scales.projected_gravity
+            noise_vec[9:12] = 0
+            noise_vec[12 : 12 + self.num_actions] = noise_scales.joint_pos * self.obs_scales.joint_pos
+            noise_vec[12 + self.num_actions : 12 + self.num_actions * 2] = (
+                noise_scales.joint_vel * self.obs_scales.joint_vel
             )
-            noise_vec[9 + self.num_actions * 2 : 9 + self.num_actions * 3] = 0.0  # 动作 (原索引52-71)
-            # 步态相位观测量已删除，无需设置噪声
+            noise_vec[12 + self.num_actions * 2 : 12 + self.num_actions * 3] = 0.0
+            noise_vec[12 + self.num_actions * 3 : 18 + self.num_actions * 3] = 0.0
             self.noise_scale_vec = noise_vec
 
             if self.cfg.scene.height_scanner.enable_height_scan:

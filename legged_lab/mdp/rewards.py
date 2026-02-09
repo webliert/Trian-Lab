@@ -28,18 +28,18 @@ from isaaclab.sensors import ContactSensor
 
 if TYPE_CHECKING:
     from legged_lab.envs.base.base_env import BaseEnv
-    # from legged_lab.envs.tienkung.tienkung_env import TienKungEnv     #训练修改,原本训练
-    # from legged_lab.envs.tienkung.my_tienkung_env import TienKungEnv    #训练修改,删除线速度和步态参数
-    # from legged_lab.envs.tienkung.only_delete_line import TienKungEnv     #训练修改，只删除线速度
-    from legged_lab.envs.tienkung.tienkung_env_75 import TienKungEnv        #训练修改，官方删除线速度
-    # from legged_lab.envs.tienkung.tienkung_env_45_only_leg import TienKungEnv   #只控制下半身
+    # from legged_lab.envs.tienkung.Robot.tienkung_env import TienKungEnv     #训练修改,原本训练
+    # from legged_lab.envs.tienkung.Robot.tienkung_env_69 import TienKungEnv    #训练修改,删除线速度和步态参数
+    # from legged_lab.envs.tienkung.Robot.tienkung_env_75_old import TienKungEnv     #训练修改，只删除线速度
+    # from legged_lab.envs.tienkung.Robot.tienkung_env_75 import TienKungEnv        #训练修改，官方删除线速度
+    from legged_lab.envs.tienkung.Robot.tienkung_env_45_only_leg import TienKungEnv   #训练修改，只控制下半身
 
 def track_lin_vel_xy_yaw_frame_exp(
     env: BaseEnv | TienKungEnv, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
     """奖励机器人跟踪XY平面线速度命令，使用yaw坐标系下的指数衰减函数。"""
     asset: Articulation = env.scene[asset_cfg.name]
-    vel_yaw = math_utils.quat_apply_inverse(
+    vel_yaw = math_utils.quat_rotate_inverse(
         math_utils.yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3]
     )
     lin_vel_error = torch.sum(torch.square(env.command_generator.command[:, :2] - vel_yaw[:, :2]), dim=1)
@@ -178,7 +178,7 @@ def body_orientation_l2(
 ) -> torch.Tensor:
     """惩罚身体特定部位的倾斜，保持局部姿态稳定。"""
     asset: Articulation = env.scene[asset_cfg.name]
-    body_orientation = math_utils.quat_apply_inverse(
+    body_orientation = math_utils.quat_rotate_inverse(
         asset.data.body_quat_w[:, asset_cfg.body_ids[0], :], asset.data.GRAVITY_VEC_W
     )
     return torch.sum(torch.square(body_orientation[:, :2]), dim=1)
@@ -215,29 +215,38 @@ def ankle_torque(env: TienKungEnv) -> torch.Tensor:
 # 惩罚踝关节动作
 def ankle_action(env: TienKungEnv) -> torch.Tensor:
     """Penalize ankle joint actions."""
-    # 原始代码：
     return torch.sum(torch.abs(env.action[:, env.ankle_joint_ids]), dim=1)
+# 只控制下半身，惩罚踝关节动作
+def only_leg_ankle_action(env: TienKungEnv) -> torch.Tensor:
+    """Penalize ankle joint actions for only leg control."""
     # 修改为适应12维action空间：踝关节对应索引4,5,10,11
-    # ankle_indices = torch.tensor([4, 5, 10, 11], device=env.device)
-    # return torch.sum(torch.abs(env.action[:, ankle_indices]), dim=1)
+    ankle_indices = torch.tensor([4, 5, 10, 11], device=env.device)
+    return torch.sum(torch.abs(env.action[:, ankle_indices]), dim=1)
 
 # 惩罚髋滚转关节动作
 def hip_roll_action(env: TienKungEnv) -> torch.Tensor:
     """Penalize hip roll joint actions."""
-    # 原始代码：
     return torch.sum(torch.abs(env.action[:, [env.left_leg_ids[0], env.right_leg_ids[0]]]), dim=1)
-    # 修改为适应12维action空间：髋滚转关节对应索引0,6
-    # hip_roll_indices = torch.tensor([0, 6], device=env.device)
-    # return torch.sum(torch.abs(env.action[:, hip_roll_indices]), dim=1)
 
+# 只控制下半身，惩罚髋滚转关节动作
+def only_leg_hip_roll_action(env: TienKungEnv) -> torch.Tensor:
+    """Penalize hip roll joint actions."""
+    # 修改为适应12维action空间：髋滚转关节对应索引0,6
+    hip_roll_indices = torch.tensor([0, 6], device=env.device)
+    return torch.sum(torch.abs(env.action[:, hip_roll_indices]), dim=1)
+    
 # 惩罚髋偏航关节动作
 def hip_yaw_action(env: TienKungEnv) -> torch.Tensor:
     """Penalize hip yaw joint actions."""
-    # 原始代码：
     return torch.sum(torch.abs(env.action[:, [env.left_leg_ids[2], env.right_leg_ids[2]]]), dim=1)
+    
+    
+# 只控制下半身，惩罚髋偏航关节动作
+def only_leg_hip_yaw_action(env: TienKungEnv) -> torch.Tensor:
+    """Penalize hip yaw joint actions."""
     # 修改为适应12维action空间：髋偏航关节对应索引2,8
-    # hip_yaw_indices = torch.tensor([2, 8], device=env.device)
-    # return torch.sum(torch.abs(env.action[:, hip_yaw_indices]), dim=1)
+    hip_yaw_indices = torch.tensor([2, 8], device=env.device)
+    return torch.sum(torch.abs(env.action[:, hip_yaw_indices]), dim=1)
 
 # 当 y 方向速度指令较低时，惩罚左右脚的 y 轴间距偏离目标值
 def feet_y_distance(env: TienKungEnv) -> torch.Tensor:

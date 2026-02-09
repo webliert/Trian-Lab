@@ -18,26 +18,26 @@
 
 from legged_lab.envs.base.base_env import BaseEnv
 from legged_lab.envs.base.base_env_config import BaseAgentCfg, BaseEnvCfg
-from legged_lab.envs.tienkung.run_cfg import TienKungRunAgentCfg, TienKungRunFlatEnvCfg
-from legged_lab.envs.tienkung.run_with_sensor_cfg import (
+from legged_lab.envs.tienkung.Experiment.run_cfg import TienKungRunAgentCfg, TienKungRunFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.run_with_sensor_cfg import (
     TienKungRunWithSensorAgentCfg,
     TienKungRunWithSensorFlatEnvCfg,
 )
-# from legged_lab.envs.tienkung.tienkung_env import TienKungEnv     #训练修改,原本训练
-# from legged_lab.envs.tieenkung.tienkung_env_69 import TienKungEnv    #训练修改,删除线速度和步态参数
-# from legged_lab.envs.tienkung.only_delete_line import TienKungEnv     #训练修改，只删除线速度
-from legged_lab.envs.tienkung.tienkung_env_75 import TienKungEnv    #训练修改，官方删除线速度
-# from legged_lab.envs.tienkung.tienkung_env_45_only_leg import TienKungEnv   #只控制下半身
+# from legged_lab.envs.tienkung.Robot.tienkung_env import TienKungEnv     #训练修改,原本训练
+# from legged_lab.envs.tienkung.Robot.tienkung_env_69 import TienKungEnv    #训练修改,删除线速度和步态参数
+# from legged_lab.envs.tienkung.Robot.tienkung_env_75_old import TienKungEnv     #训练修改，只删除线速度
+# from legged_lab.envs.tienkung.Robot.tienkung_env_75 import TienKungEnv    #训练修改，官方删除线速度
+from legged_lab.envs.tienkung.Robot.tienkung_env_45_only_leg import TienKungEnv   #训练修改，只控制下半身
 
-from legged_lab.envs.tienkung.walk_cfg import (
+from legged_lab.envs.tienkung.Experiment.walk_cfg import (
     TienKungWalkAgentCfg,
     TienKungWalkFlatEnvCfg,
 )
-from legged_lab.envs.tienkung.walk_cfg_only_leg import (
+from legged_lab.envs.tienkung.Experiment.walk_cfg_only_leg import (
     TienKungWalkAgentCfg_OnlyLeg,
     TienKungWalkFlatEnvCfg_OnlyLeg,
 )
-from legged_lab.envs.tienkung.walk_with_sensor_cfg import (
+from legged_lab.envs.tienkung.Experiment.walk_with_sensor_cfg import (
     TienKungWalkWithSensorAgentCfg,
     TienKungWalkWithSensorFlatEnvCfg,
 )

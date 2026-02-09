@@ -140,9 +140,9 @@ class LiteRewardCfg:
     )
 
     ankle_torque = RewTerm(func=mdp.ankle_torque, weight=-0.0005)
-    ankle_action = RewTerm(func=mdp.ankle_action, weight=-0.001)
-    hip_roll_action = RewTerm(func=mdp.hip_roll_action, weight=-1.0)
-    hip_yaw_action = RewTerm(func=mdp.hip_yaw_action, weight=-1.0)
+    ankle_action = RewTerm(func=mdp.only_leg_ankle_action, weight=-0.001)
+    hip_roll_action = RewTerm(func=mdp.only_leg_hip_roll_action, weight=-1.0)
+    hip_yaw_action = RewTerm(func=mdp.only_leg_hip_yaw_action, weight=-1.0)
     feet_y_distance = RewTerm(func=mdp.feet_y_distance, weight=-2.0)
 
 

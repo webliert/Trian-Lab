@@ -159,7 +159,7 @@ class MujocoRunner:
         obs[0:3] = self.data.sensor("angular-velocity").data.astype(np.double)
 
         # Projected gravity
-        obs[3:6] = self.quat_apply_inverse(
+        obs[3:6] = self.quat_rotate_inverse(
             self.data.sensor("orientation").data[[1, 2, 3, 0]].astype(np.double), np.array([0, 0, -1])
         )
         # Command velocity
@@ -224,7 +224,7 @@ class MujocoRunner:
         self.listener.stop()
         self.viewer.close()
 
-    def quat_apply_inverse(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
+    def quat_rotate_inverse(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
         """
         Rotate a vector by the inverse of a quaternion.
 

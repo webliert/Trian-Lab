@@ -32,10 +32,10 @@ from isaaclab.utils.buffers import CircularBuffer, DelayBuffer
 from isaaclab.utils.math import quat_apply, quat_conjugate, quat_apply
 from scipy.spatial.transform import Rotation
 
-from legged_lab.envs.tienkung.run_cfg import TienKungRunFlatEnvCfg
-from legged_lab.envs.tienkung.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
-from legged_lab.envs.tienkung.walk_cfg import TienKungWalkFlatEnvCfg
-from legged_lab.envs.tienkung.walk_with_sensor_cfg import (
+from legged_lab.envs.tienkung.Experiment.run_cfg import TienKungRunFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.walk_cfg import TienKungWalkFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.walk_with_sensor_cfg import (
     TienKungWalkWithSensorFlatEnvCfg,
 )
 from legged_lab.utils.env_utils.scene import SceneCfg
@@ -44,6 +44,13 @@ from rsl_rl.utils import AMPLoaderDisplay
 
 
 class TienKungEnv(VecEnv):
+    """
+    天工机器人环境类 / TienKung Robot Environment Class
+    
+    继承自VecEnv，实现天工机器人的具体仿真环境和控制逻辑。
+    Inherits from VecEnv, implements specific simulation environment and control logic for TienKung robot.
+    """
+
     def __init__(
         self,
         cfg: (
@@ -54,6 +61,13 @@ class TienKungEnv(VecEnv):
         ),
         headless,
     ):
+        """
+        环境初始化 / Environment initialization
+        
+        Args:
+            cfg: 环境配置对象，支持多种配置类型 / Environment configuration object, supports multiple configuration types
+            headless: 是否无头模式 / Whether to run in headless mode
+        """
         self.cfg: (
             TienKungRunFlatEnvCfg
             | TienKungWalkFlatEnvCfg
@@ -124,6 +138,14 @@ class TienKungEnv(VecEnv):
             motion_files=self.cfg.amp_motion_files_display, device=self.device, time_between_frames=self.physics_dt
         )
         self.motion_len = self.amp_loader_display.trajectory_num_frames[0]
+
+    """
+    天工机器人环境实现模块 / TienKung Robot Environment Implementation Module
+    
+    该模块实现了天工机器人的强化学习环境，包含运动控制、传感器数据处理、奖励计算等功能。
+    This module implements the reinforcement learning environment for TienKung robot, 
+    including motion control, sensor data processing, reward calculation, etc.
+    """
 
     def init_buffers(self):
         self.extras = {}
@@ -289,7 +311,7 @@ class TienKungEnv(VecEnv):
             [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]], dtype=torch.float32, device=device
         )
 
-        lin_vel = visual_motion_frame[27:30].clone()
+        lin_vel = visual_motion_frame[26:29].clone()
         ang_vel = torch.zeros_like(lin_vel)
 
         # root state: [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]

@@ -32,10 +32,10 @@ from isaaclab.utils.buffers import CircularBuffer, DelayBuffer
 from isaaclab.utils.math import quat_apply, quat_conjugate, quat_apply
 from scipy.spatial.transform import Rotation
 
-from legged_lab.envs.tienkung.run_cfg import TienKungRunFlatEnvCfg
-from legged_lab.envs.tienkung.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
-from legged_lab.envs.tienkung.walk_cfg import TienKungWalkFlatEnvCfg
-from legged_lab.envs.tienkung.walk_with_sensor_cfg import (
+from legged_lab.envs.tienkung.Experiment.run_cfg import TienKungRunFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
+from legged_lab.envs.tienkung.Experiment.walk_cfg_only_leg import TienKungWalkFlatEnvCfg_OnlyLeg
+from legged_lab.envs.tienkung.Experiment.walk_with_sensor_cfg import (
     TienKungWalkWithSensorFlatEnvCfg,
 )
 from legged_lab.utils.env_utils.scene import SceneCfg
@@ -47,16 +47,16 @@ class TienKungEnv(VecEnv):
     def __init__(
         self,
         cfg: (
-            TienKungRunFlatEnvCfg
-            | TienKungWalkFlatEnvCfg
+            TienKungWalkFlatEnvCfg_OnlyLeg
+            | TienKungRunFlatEnvCfg
             | TienKungWalkWithSensorFlatEnvCfg
             | TienKungRunWithSensorFlatEnvCfg
         ),
         headless,
     ):
         self.cfg: (
-            TienKungRunFlatEnvCfg
-            | TienKungWalkFlatEnvCfg
+            TienKungWalkFlatEnvCfg_OnlyLeg
+            | TienKungRunFlatEnvCfg
             | TienKungWalkWithSensorFlatEnvCfg
             | TienKungRunWithSensorFlatEnvCfg
         )
@@ -125,12 +125,13 @@ class TienKungEnv(VecEnv):
         )
         self.motion_len = self.amp_loader_display.trajectory_num_frames[0]
 
-    def init_buffers(self):
+    def init_buffers(self):     
         self.extras = {}
 
         self.max_episode_length_s = self.cfg.scene.max_episode_length_s
         self.max_episode_length = np.ceil(self.max_episode_length_s / self.step_dt)
-        self.num_actions = self.robot.data.default_joint_pos.shape[1]
+        # self.num_actions = self.robot.data.default_joint_pos.shape[1]
+        self.num_actions = 12   #修改action维度
         self.clip_actions = self.cfg.normalization.clip_actions
         self.clip_obs = self.cfg.normalization.clip_observations
 
@@ -165,7 +166,7 @@ class TienKungEnv(VecEnv):
         )
         self.elbow_body_ids, _ = self.robot.find_bodies(
             name_keys=["elbow_pitch_l_link", "elbow_pitch_r_link"], preserve_order=True
-        )
+        )#这里需要修改为不同的映射
         self.left_leg_ids, _ = self.robot.find_joints(
             name_keys=[
                 "hip_roll_l_joint",
@@ -206,6 +207,36 @@ class TienKungEnv(VecEnv):
             ],
             preserve_order=True,
         )
+        # 修改定义期望的关节顺序索引  
+        self.desired_joint_order = torch.tensor([  
+        # 左腿 (0-5)  
+        self.left_leg_ids[0],  # hip_roll_l  
+        self.left_leg_ids[1],  # hip_pitch_l  
+        self.left_leg_ids[2],  # hip_yaw_l  
+        self.left_leg_ids[3],  # knee_pitch_l  
+        self.left_leg_ids[4],  # ankle_pitch_l  
+        self.left_leg_ids[5],  # ankle_roll_l  
+        # 右腿 (6-11)  
+        self.right_leg_ids[0],  # hip_roll_r  
+        self.right_leg_ids[1],  # hip_pitch_r  
+        self.right_leg_ids[2],  # hip_yaw_r  
+        self.right_leg_ids[3],  # knee_pitch_r  
+        self.right_leg_ids[4],  # ankle_pitch_r  
+        self.right_leg_ids[5],  # ankle_roll_r  
+        # 左臂 (12-15)  
+        self.left_arm_ids[0],   # shoulder_pitch_l  
+        self.left_arm_ids[1],   # shoulder_roll_l  
+        self.left_arm_ids[2],   # shoulder_yaw_l  
+        self.left_arm_ids[3],   # elbow_pitch_l  
+        # 右臂 (16-19)  
+        self.right_arm_ids[0],  # shoulder_pitch_r  
+        self.right_arm_ids[1],  # shoulder_roll_r  
+        self.right_arm_ids[2],  # shoulder_yaw_r  
+        self.right_arm_ids[3],  # elbow_pitch_r  
+        ], device=self.device)
+        # 创建反向索引  
+        self.inverse_joint_order = torch.argsort(self.desired_joint_order)
+        
         self.ankle_joint_ids, _ = self.robot.find_joints(
             name_keys=["ankle_pitch_l_joint", "ankle_pitch_r_joint", "ankle_roll_l_joint", "ankle_roll_r_joint"],
             preserve_order=True,
@@ -221,19 +252,6 @@ class TienKungEnv(VecEnv):
         self.left_arm_local_vec = torch.tensor([0.0, 0.0, -0.3], device=self.device).repeat((self.num_envs, 1))
         self.right_arm_local_vec = torch.tensor([0.0, 0.0, -0.3], device=self.device).repeat((self.num_envs, 1))
 
-        # Init gait parameter
-        self.gait_phase = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
-        self.gait_cycle = torch.full(
-            (self.num_envs,), self.cfg.gait.gait_cycle, dtype=torch.float, device=self.device, requires_grad=False
-        )
-        self.phase_ratio = torch.tensor(
-            [self.cfg.gait.gait_air_ratio_l, self.cfg.gait.gait_air_ratio_r], dtype=torch.float, device=self.device
-        ).repeat(self.num_envs, 1)
-        self.phase_offset = torch.tensor(
-            [self.cfg.gait.gait_phase_offset_l, self.cfg.gait.gait_phase_offset_r],
-            dtype=torch.float,
-            device=self.device,
-        ).repeat(self.num_envs, 1)
         self.action = torch.zeros(
             self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False
         )
@@ -335,14 +353,14 @@ class TienKungEnv(VecEnv):
         self.right_arm_dof_vel = dof_vel[:, self.right_arm_ids]
         return torch.cat(
             (
-                self.right_arm_dof_pos,
-                self.left_arm_dof_pos,
-                self.right_leg_dof_pos,
                 self.left_leg_dof_pos,
-                self.right_arm_dof_vel,
-                self.left_arm_dof_vel,
-                self.right_leg_dof_vel,
+                self.right_leg_dof_pos,
+                self.left_arm_dof_pos,
+                self.right_arm_dof_pos,
                 self.left_leg_dof_vel,
+                self.right_leg_dof_vel,
+                self.left_arm_dof_vel,
+                self.right_arm_dof_vel,
                 left_hand_pos,
                 right_hand_pos,
                 left_foot_pos,
@@ -358,28 +376,24 @@ class TienKungEnv(VecEnv):
         ang_vel = robot.data.root_ang_vel_b
         projected_gravity = robot.data.projected_gravity_b
         command = self.command_generator.command
-        joint_pos = robot.data.joint_pos - robot.data.default_joint_pos
-        joint_vel = robot.data.joint_vel - robot.data.default_joint_vel
+        joint_pos = (robot.data.joint_pos - robot.data.default_joint_pos)[:, self.desired_joint_order]  
+        joint_vel = (robot.data.joint_vel - robot.data.default_joint_vel)[:, self.desired_joint_order] #修改，增加映射
+        # 修改动作已经是反向映射后的,需要再次正向映射回策略网络的顺序  
         action = self.action_buffer._circular_buffer.buffer[:, -1, :]
         root_lin_vel = robot.data.root_lin_vel_b
         feet_contact = torch.max(torch.norm(net_contact_forces[:, :, self.feet_cfg.body_ids], dim=-1), dim=1)[0] > 0.5
-
         current_actor_obs = torch.cat(
             [
-                # root_lin_vel * self.obs_scales.lin_vel,  # 3
                 ang_vel * self.obs_scales.ang_vel,  # 3
                 projected_gravity * self.obs_scales.projected_gravity,  # 3
                 command * self.obs_scales.commands,  # 3
-                joint_pos * self.obs_scales.joint_pos,  # 20
-                joint_vel * self.obs_scales.joint_vel,  # 20
-                action * self.obs_scales.actions,  # 20
-                torch.sin(2 * torch.pi * self.gait_phase),  # 2
-                torch.cos(2 * torch.pi * self.gait_phase),  # 2
-                self.phase_ratio,  # 2
+                joint_pos[:, :12] * self.obs_scales.joint_pos,  # 12,修改为只需要腿的数据
+                joint_vel[:, :12] * self.obs_scales.joint_vel,  # 12,修改为只需要腿的数据
+                action * self.obs_scales.actions,  # 12,修改为适应12维action空间
             ],
             dim=-1,
         )
-        current_critic_obs = torch.cat([current_actor_obs, feet_contact], dim=-1)
+        current_critic_obs = torch.cat([current_actor_obs, root_lin_vel * self.obs_scales.lin_vel, feet_contact], dim=-1)
 
         return current_actor_obs, current_critic_obs
 
@@ -455,11 +469,11 @@ class TienKungEnv(VecEnv):
         self.scene.write_data_to_sim()
         self.sim.forward()
 
-    def step(self, actions: torch.Tensor):
-        delayed_actions = self.action_buffer.compute(actions)
-        self.action = torch.clip(delayed_actions, -self.clip_actions, self.clip_actions).to(self.device)
-
-        processed_actions = self.action * self.action_scale + self.robot.data.default_joint_pos
+    def step(self, actions: torch.Tensor): 
+        delayed_actions = self.action_buffer.compute(actions)  
+        self.action = torch.clip(delayed_actions, -self.clip_actions, self.clip_actions).to(self.device)  
+      
+        processed_actions = self.action * self.action_scale + self.robot.data.default_joint_pos[:, self.desired_joint_order[:12]]
 
         self.avg_feet_force_per_step = torch.zeros(
             self.num_envs, len(self.feet_cfg.body_ids), dtype=torch.float, device=self.device, requires_grad=False
@@ -469,7 +483,10 @@ class TienKungEnv(VecEnv):
         )
         for _ in range(self.cfg.sim.decimation):
             self.sim_step_counter += 1
-            self.robot.set_joint_position_target(processed_actions)
+            # 创建完整尺寸的关节位置目标张量，只更新我们关心的关节
+            full_joint_pos_target = self.robot.data.default_joint_pos.clone()
+            full_joint_pos_target[:, self.desired_joint_order[:12]] = processed_actions
+            self.robot.set_joint_position_target(full_joint_pos_target)
             self.scene.write_data_to_sim()
             self.sim.step(render=False)
             self.scene.update(dt=self.physics_dt)
@@ -486,7 +503,6 @@ class TienKungEnv(VecEnv):
             self.sim.render()
 
         self.episode_length_buf += 1
-        self._calculate_gait_para()
 
         self.command_generator.compute(self.step_dt)
         if "interval" in self.event_manager.available_modes:
@@ -525,16 +541,16 @@ class TienKungEnv(VecEnv):
             actor_obs, _ = self.compute_current_observations()
             noise_vec = torch.zeros_like(actor_obs[0])
             noise_scales = self.cfg.noise.noise_scales
-            # noise_vec[:3] = noise_scales.lin_vel * self.obs_scales.lin_vel
-            noise_vec[:3] = noise_scales.ang_vel * self.obs_scales.ang_vel  #角速度 3
-            noise_vec[3:6] = noise_scales.projected_gravity * self.obs_scales.projected_gravity #重力投影 3
-            noise_vec[6:9] = 0  #外部命令 3
-            noise_vec[9 : 9 + self.num_actions] = noise_scales.joint_pos * self.obs_scales.joint_pos  #关节位置 20
-            noise_vec[9 + self.num_actions : 9 + self.num_actions * 2] = (
-                noise_scales.joint_vel * self.obs_scales.joint_vel  #关节速度 20
+            noise_vec[:3] = noise_scales.lin_vel * self.obs_scales.lin_vel
+            noise_vec[3:6] = noise_scales.ang_vel * self.obs_scales.ang_vel
+            noise_vec[6:9] = noise_scales.projected_gravity * self.obs_scales.projected_gravity
+            noise_vec[9:12] = 0
+            noise_vec[12 : 12 + self.num_actions] = noise_scales.joint_pos * self.obs_scales.joint_pos
+            noise_vec[12 + self.num_actions : 12 + self.num_actions * 2] = (
+                noise_scales.joint_vel * self.obs_scales.joint_vel
             )
-            noise_vec[9 + self.num_actions * 2 : 9 + self.num_actions * 3] = 0.0    #输出动作 20
-            noise_vec[9 + self.num_actions * 3 : 15 + self.num_actions * 3] = 0.0   #步态参数 6
+            noise_vec[12 + self.num_actions * 2 : 12 + self.num_actions * 3] = 0.0
+            noise_vec[12 + self.num_actions * 3 : 18 + self.num_actions * 3] = 0.0
             self.noise_scale_vec = noise_vec
 
             if self.cfg.scene.height_scanner.enable_height_scan:
@@ -603,14 +619,14 @@ class TienKungEnv(VecEnv):
         self.right_arm_dof_vel = self.robot.data.joint_vel[:, self.right_arm_ids]
         return torch.cat(
             (
-                self.right_arm_dof_pos,
-                self.left_arm_dof_pos,
-                self.right_leg_dof_pos,
                 self.left_leg_dof_pos,
-                self.right_arm_dof_vel,
-                self.left_arm_dof_vel,
-                self.right_leg_dof_vel,
+                self.right_leg_dof_pos,
+                self.left_arm_dof_pos,
+                self.right_arm_dof_pos,
                 self.left_leg_dof_vel,
+                self.right_leg_dof_vel,
+                self.left_arm_dof_vel,
+                self.right_arm_dof_vel,
                 left_hand_pos,
                 right_hand_pos,
                 left_foot_pos,
@@ -628,11 +644,3 @@ class TienKungEnv(VecEnv):
         except ModuleNotFoundError:
             pass
         return torch_utils.set_seed(seed)
-
-    def _calculate_gait_para(self) -> None:
-        """
-        Update gait phase parameters based on simulation time and offset.
-        """
-        t = self.episode_length_buf * self.step_dt / self.gait_cycle
-        self.gait_phase[:, 0] = (t + self.phase_offset[:, 0]) % 1.0
-        self.gait_phase[:, 1] = (t + self.phase_offset[:, 1]) % 1.0
