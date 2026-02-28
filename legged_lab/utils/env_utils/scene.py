@@ -44,6 +44,7 @@ class SceneCfg(InteractiveSceneCfg):
             prim_path="/World/ground",
             terrain_type=config.terrain_type,
             terrain_generator=config.terrain_generator,
+            usd_path=config.usd_path,
             max_init_terrain_level=config.max_init_terrain_level,
             collision_group=-1,
             physics_material=sim_utils.RigidBodyMaterialCfg(

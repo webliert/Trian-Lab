@@ -23,11 +23,11 @@ from legged_lab.envs.tienkung.Experiment.run_with_sensor_cfg import (
     TienKungRunWithSensorAgentCfg,
     TienKungRunWithSensorFlatEnvCfg,
 )
-# from legged_lab.envs.tienkung.Robot.tienkung_env import TienKungEnv     #训练修改,原本训练
+from legged_lab.envs.tienkung.Robot.tienkung_env import TienKungEnv     #训练修改,原本训练
 # from legged_lab.envs.tienkung.Robot.tienkung_env_69 import TienKungEnv    #训练修改,删除线速度和步态参数
 # from legged_lab.envs.tienkung.Robot.tienkung_env_75_old import TienKungEnv     #训练修改，只删除线速度
 # from legged_lab.envs.tienkung.Robot.tienkung_env_75 import TienKungEnv    #训练修改，官方删除线速度
-from legged_lab.envs.tienkung.Robot.tienkung_env_45_only_leg import TienKungEnv   #训练修改，只控制下半身
+# from legged_lab.envs.tienkung.Robot.tienkung_env_45_only_leg import TienKungEnv   #训练修改，只控制下半身
 
 from legged_lab.envs.tienkung.Experiment.walk_cfg import (
     TienKungWalkAgentCfg,
@@ -41,6 +41,12 @@ from legged_lab.envs.tienkung.Experiment.walk_with_sensor_cfg import (
     TienKungWalkWithSensorAgentCfg,
     TienKungWalkWithSensorFlatEnvCfg,
 )
+# Unitree-RL-Lab style configuration (standard PPO, no AMP)
+from legged_lab.envs.tienkung.Experiment.unitree_style_walk_cfg import (
+    TienKungUnitreeStyleEnvCfg,
+    TienKungUnitreeStyleAgentCfg,
+)
+
 from legged_lab.utils.task_registry import task_registry
 
 task_registry.register("walk", TienKungEnv, TienKungWalkFlatEnvCfg(), TienKungWalkAgentCfg())
@@ -53,4 +59,8 @@ task_registry.register(
 )
 task_registry.register(
     "walk_only_leg", TienKungEnv, TienKungWalkFlatEnvCfg_OnlyLeg(), TienKungWalkAgentCfg_OnlyLeg()
+)
+# Register Unitree-RL-Lab style task (standard PPO, no AMP)
+task_registry.register(
+    "unitree_style_walk", TienKungEnv, TienKungUnitreeStyleEnvCfg(), TienKungUnitreeStyleAgentCfg()
 )

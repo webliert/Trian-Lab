@@ -82,6 +82,7 @@ class BaseSceneCfg:
     robot: ArticulationCfg = MISSING  # 机器人配置 / Robot configuration
     terrain_type: str = MISSING  # 地形类型 / Terrain type
     terrain_generator: TerrainGeneratorCfg = None  # 地形生成器配置 / Terrain generator configuration
+    usd_path: str = None  # USD文件路径 / USD file path
     max_init_terrain_level: int = 5  # 最大初始地形等级 / Maximum initial terrain level
     height_scanner: HeightScannerCfg = HeightScannerCfg()  # 高度扫描仪配置 / Height scanner configuration
     lidar: LidarCfg = LidarCfg()  # 激光雷达配置 / LiDAR configuration
