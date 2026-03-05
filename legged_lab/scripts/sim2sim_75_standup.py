@@ -16,6 +16,18 @@
 # with additional modifications by the TienKung-Lab Project,
 # and is distributed under the BSD-3-Clause license.
 
+"""
+Sim2Sim Standup Controller
+
+This script runs a humanoid robot in MuJoCo simulation with the following behavior:
+1. First 5 seconds: Robot performs in-place stepping (原地踏步)
+2. After 5 seconds: Robot transitions to standing posture using synchronized gait parameters
+
+The standing is achieved by modifying gait parameters:
+- gait_air_ratio: Set to 0.0 (feet stay on ground)
+- gait_phase: Synchronized to maintain stable standing
+"""
+
 import argparse
 import os
 import sys
@@ -26,6 +38,7 @@ import numpy as np
 import torch
 from pynput import keyboard
 import time
+
 
 class SimToSimCfg:
     """Configuration class for sim2sim parameters.
@@ -45,17 +58,24 @@ class SimToSimCfg:
         action_scale = 0.25
 
     class robot:
+        # Walking gait parameters (default)
         gait_air_ratio_l: float = 0.38
         gait_air_ratio_r: float = 0.38
         gait_phase_offset_l: float = 0.38
         gait_phase_offset_r: float = 0.88
         gait_cycle: float = 0.85
+        
+    class standup:
+        standup_delay = 5.0  # Time in seconds before transitioning to standing
 
 
 class MujocoRunner:
     """
-    Sim2Sim runner that loads a policy and a MuJoCo model
+    Sim2Sim runner with standup functionality that loads a policy and a MuJoCo model
     to run real-time humanoid control simulation.
+
+    The robot will perform in-place stepping for the first 5 seconds,
+    then transition to standing posture.
 
     Args:
         cfg (SimToSimCfg): Configuration object for simulation.
@@ -89,6 +109,17 @@ class MujocoRunner:
         self.gait_cycle = self.cfg.robot.gait_cycle
         self.phase_ratio = np.array([self.cfg.robot.gait_air_ratio_l, self.cfg.robot.gait_air_ratio_r])
         self.phase_offset = np.array([self.cfg.robot.gait_phase_offset_l, self.cfg.robot.gait_phase_offset_r])
+        
+        # Standup state variables
+        self.is_standing = False
+        self.standup_start_time = self.cfg.standup.standup_delay
+        
+        # Original (walking) gait parameters for reference
+        self.walking_gait_air_ratio_l = self.cfg.robot.gait_air_ratio_l
+        self.walking_gait_air_ratio_r = self.cfg.robot.gait_air_ratio_r
+        self.walking_gait_phase_offset_l = self.cfg.robot.gait_phase_offset_l
+        self.walking_gait_phase_offset_r = self.cfg.robot.gait_phase_offset_r
+        self.walking_gait_cycle = self.cfg.robot.gait_cycle
 
         self.mujoco_to_isaac_idx = [
             0,  # hip_roll_l_joint
@@ -110,7 +141,7 @@ class MujocoRunner:
             4,  # ankle_pitch_l_joint
             10,  # ankle_pitch_r_joint
             5,  # ankle_roll_l_joint
-            11,  # ankle_roll_r_joint
+            11,  # ankle_roll_r_joint,
         ]
         self.isaac_to_mujoco_idx = [
             0,  # hip_roll_l_joint
@@ -132,7 +163,7 @@ class MujocoRunner:
             3,  # shoulder_pitch_r_joint
             7,  # shoulder_roll_r_joint
             11,  # shoulder_yaw_r_joint
-            15,  # elbow_pitch_r_joint
+            15,  # elbow_pitch_r_joint,
         ]
         # Initial command vel
         self.command_vel = np.array([0.0, 0.0, 0.0])
@@ -147,18 +178,12 @@ class MujocoRunner:
         Returns:
             np.ndarray: Normalized and clipped observation history.
         """
-            # 打印原始四元数数据
+        # Print raw quaternion data for debugging
         orientation_data = self.data.sensor("orientation").data
-        # print(f"原始四元数数据: {orientation_data}")
-        # print(f"四元数形状: {orientation_data.shape}")
-        # print(f"四元数顺序: [w={orientation_data[0]:.6f}, x={orientation_data[1]:.6f}, y={orientation_data[2]:.6f}, z={orientation_data[3]:.6f}]")
         
-        # 打印排列后的四元数
-        reordered = orientation_data[[1, 2, 3, 0]]
-        # print(f"重排后四元数: [x={reordered[0]:.6f}, y={reordered[1]:.6f}, z={reordered[2]:.6f}, w={reordered[3]:.6f}]")
         self.dof_pos = self.data.sensordata[0:20]
         self.dof_vel = self.data.sensordata[20:40]
-        self.imu_increase = 0.9
+        self.imu_increase = 1.0
 
         obs = np.concatenate(
             [
@@ -193,6 +218,36 @@ class MujocoRunner:
         actions_scaled = self.action * self.cfg.sim.action_scale
         return actions_scaled[self.isaac_to_mujoco_idx] + self.default_dof_pos
 
+    def transition_to_standing(self) -> None:
+        """
+        Transition gait parameters to achieve standing posture.
+        
+        Standing is achieved by:
+        1. Setting gait_air_ratio to 0.0 (feet stay on ground)
+        2. Synchronizing gait phases (both legs have same phase)
+        3. Setting phase_ratio to 0.0
+        """
+        if not self.is_standing:
+            print(f"\n[INFO] Transitioning to standing at time {self.data.time:.2f}s")
+            self.is_standing = True
+            
+            # Set gait parameters for standing
+            # Air ratio 0 means feet stay on ground
+            self.phase_ratio = np.array([0.0, 0.0])
+            
+            # Synchronize both legs to same phase for stable standing
+            self.gait_phase[0] = 0.0
+            self.gait_phase[1] = 0.0
+            
+            # Adjust phase offset to synchronize
+            self.phase_offset[0] = 0.0
+            self.phase_offset[1] = 0.0
+            
+            # Keep zero velocity command
+            self.command_vel = np.array([0.0, 0.0, 0.0])
+            
+            print(f"[INFO] Standing mode activated - gait parameters synchronized")
+
     def run(self) -> None:
         """
         Run the simulation loop with keyboard-controlled commands.
@@ -201,6 +256,14 @@ class MujocoRunner:
         self.listener.start()
 
         while self.data.time < self.cfg.sim.sim_duration:
+            # Check if it's time to transition to standing
+            if not self.is_standing and self.data.time >= self.standup_start_time:
+                self.transition_to_standing()
+            
+            # Check for manual standup trigger (press 's' key)
+            if not self.is_standing:
+                pass  # Will be handled by keyboard listener
+
             self.obs_history = self.get_obs()
             self.action[:] = self.policy(torch.tensor(self.obs_history, dtype=torch.float32)).detach().numpy()[:20]
             self.action = np.clip(self.action, -self.cfg.sim.clip_actions, self.cfg.sim.clip_actions)
@@ -244,10 +307,18 @@ class MujocoRunner:
     def calculate_gait_para(self) -> None:
         """
         Update gait phase parameters based on simulation time and offset.
+        
+        If standing, both legs are synchronized with zero phase.
         """
-        t = self.episode_length_buf * self.dt / self.gait_cycle
-        self.gait_phase[0] = (t + self.phase_offset[0]) % 1.0
-        self.gait_phase[1] = (t + self.phase_offset[1]) % 1.0
+        if self.is_standing:
+            # During standing, keep phases synchronized at 0
+            self.gait_phase[0] = 0.0
+            self.gait_phase[1] = 0.0
+        else:
+            # Normal walking/trotting gait calculation
+            t = self.episode_length_buf * self.dt / self.gait_cycle
+            self.gait_phase[0] = (t + self.phase_offset[0]) % 1.0
+            self.gait_phase[1] = (t + self.phase_offset[1]) % 1.0
 
     def adjust_command_vel(self, idx: int, increment: float) -> None:
         """
@@ -279,6 +350,9 @@ class MujocoRunner:
                     self.adjust_command_vel(2, -0.2)
                 elif key.char == "9":  # NumPad 9      yaw -= 0.2
                     self.adjust_command_vel(2, 0.2)
+                elif key.char == "s" or key.char == "S":  # Manual standup trigger
+                    if not self.is_standing:
+                        self.transition_to_standing()
             except AttributeError:
                 pass
 
@@ -287,7 +361,7 @@ class MujocoRunner:
 
 if __name__ == "__main__":
     LEGGED_LAB_ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-    parser = argparse.ArgumentParser(description="Run sim2sim Mujoco controller.")
+    parser = argparse.ArgumentParser(description="Run sim2sim Mujoco controller with standup functionality.")
     parser.add_argument(
         "--task",
         type=str,
@@ -308,6 +382,12 @@ if __name__ == "__main__":
         help="Path to model.xml",
     )
     parser.add_argument("--duration", type=float, default=100.0, help="Simulation duration in seconds")
+    parser.add_argument(
+        "--standup-delay",
+        type=float,
+        default=5.0,
+        help="Time in seconds before transitioning to standing (default: 5.0)",
+    )
     args = parser.parse_args()
 
     if args.policy is None:
@@ -323,9 +403,11 @@ if __name__ == "__main__":
     print(f"[INFO] Loaded task preset: {args.task.upper()}")
     print(f"[INFO] Loaded policy: {args.policy}")
     print(f"[INFO] Loaded model: {args.model}")
+    print(f"[INFO] Standup delay: {args.standup_delay} seconds")
 
     sim_cfg = SimToSimCfg()
     sim_cfg.sim.sim_duration = args.duration
+    sim_cfg.standup.standup_delay = args.standup_delay
 
     # Set gait parameters according to task
     if args.task == "walk":
