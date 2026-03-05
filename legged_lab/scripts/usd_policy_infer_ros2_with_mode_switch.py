@@ -2023,6 +2023,12 @@ def main():
                         env.phase_ratio[:, 1] = 0.0
                         env.gait_phase[:, 0] = 0.0
                         env.gait_phase[:, 1] = 0.0
+                    
+                    # For balance in stand mode, we need to give the policy zero velocity commands
+                    # This allows the policy's balance reward to take effect
+                    lin_vel_x = 0.0
+                    lin_vel_y = 0.0
+                    ang_vel_z = 0.0
                 else:
                     # In walk mode, get velocity commands from cmd_vel subscriber
                     if cmd_vel_subscriber is not None:

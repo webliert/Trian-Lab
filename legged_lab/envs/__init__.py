@@ -46,6 +46,11 @@ from legged_lab.envs.tienkung.Experiment.unitree_style_walk_cfg import (
     TienKungUnitreeStyleEnvCfg,
     TienKungUnitreeStyleAgentCfg,
 )
+# Walk and Stand configuration
+from legged_lab.envs.tienkung.Experiment.walk_and_stand_cfg import (
+    TienKungWalkAndStandAgentCfg,
+    TienKungWalkAndStandFlatEnvCfg,
+)
 
 from legged_lab.utils.task_registry import task_registry
 
@@ -63,4 +68,8 @@ task_registry.register(
 # Register Unitree-RL-Lab style task (standard PPO, no AMP)
 task_registry.register(
     "unitree_style_walk", TienKungEnv, TienKungUnitreeStyleEnvCfg(), TienKungUnitreeStyleAgentCfg()
+)
+# Register Walk and Stand task
+task_registry.register(
+    "walk_and_stand", TienKungEnv, TienKungWalkAndStandFlatEnvCfg(), TienKungWalkAndStandAgentCfg()
 )
