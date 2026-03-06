@@ -2019,8 +2019,13 @@ def main():
                     
                     # Continuously update gait parameters to maintain standing
                     if has_gait_params:
-                        env.phase_ratio[:, 0] = 0.0
-                        env.phase_ratio[:, 1] = 0.0
+                        # 平滑过渡到站立模式
+                        # 使用线性插值逐步将phase_ratio从当前值过渡到0
+                        transition_speed = 0.1  # 每步过渡10%
+                        env.phase_ratio[:, 0] = env.phase_ratio[:, 0] * (1 - transition_speed)
+                        env.phase_ratio[:, 1] = env.phase_ratio[:, 1] * (1 - transition_speed)
+                        
+                        # 同步步态相位
                         env.gait_phase[:, 0] = 0.0
                         env.gait_phase[:, 1] = 0.0
                     

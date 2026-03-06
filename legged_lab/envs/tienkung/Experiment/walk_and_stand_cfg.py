@@ -369,18 +369,20 @@ class LiteRewardCfg:
     
     # ===== 站立相关奖励 / Stand-related rewards =====
     # 平坦朝向L2惩罚 - 保持身体直立 / Flat orientation L2 penalty - keep body upright
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.5)
+    # 增加权重以增强站立稳定性
+    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-3.0)
     
     # 身体朝向L2惩罚 / Body orientation L2 penalty
+    # 增加权重以增强站立稳定性
     body_orientation_l2 = RewTerm(
-        func=mdp.body_orientation_l2, params={"asset_cfg": SceneEntityCfg("robot", body_names="pelvis")}, weight=-2.0
+        func=mdp.body_orientation_l2, params={"asset_cfg": SceneEntityCfg("robot", body_names="pelvis")}, weight=-3.0
     )
     
     # 线性速度Z L2惩罚 / Linear velocity Z L2 penalty
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-1.0)
+    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
     
-    # 角速度XY L2惩罚 / Angular velocity XY L2 penalty
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+    # 角速度XY L2惩罚 - 站立时特别重要 / Angular velocity XY L2 penalty - especially important for standing
+    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.5)
     
     # 能量消耗惩罚 / Energy consumption penalty
     energy = RewTerm(func=mdp.energy, weight=-1e-3)
@@ -589,7 +591,8 @@ class TienKungWalkAndStandFlatEnvCfg:
     commands: CommandsCfg = CommandsCfg(
         resampling_time_range=(10.0, 10.0),
         # 增加站立环境比例 - 让更多环境处于站立状态 / Increase stand environment ratio - let more environments be in standing state
-        rel_standing_envs=0.3,  # 30% 环境站立，70% 环境行走 / 30% environments stand, 70% environments walk
+        # 修改为50%站立，50%行走，确保策略学习到良好的站立能力
+        rel_standing_envs=0.5,  # 50% 环境站立，50% 环境行走 / 50% environments stand, 50% environments walk
         rel_heading_envs=1.0,
         heading_command=True,
         heading_control_stiffness=0.5,

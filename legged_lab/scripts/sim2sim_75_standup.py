@@ -66,7 +66,11 @@ class SimToSimCfg:
         gait_cycle: float = 0.85
         
     class standup:
-        standup_delay = 5.0  # Time in seconds before transitioning to standing
+        # 缩短站立延迟时间，让机器人更快过渡到站立状态
+        # 原来是5.0秒，现在改为2.0秒
+        standup_delay = 2.0  # Time in seconds before transitioning to standing
+        # 添加站立过渡的平滑因子
+        standup_transition_steps = 100  # Number of steps for smooth transition
 
 
 class MujocoRunner:
