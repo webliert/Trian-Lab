@@ -21,7 +21,7 @@ import argparse  # 用于解析命令行参数
 from isaaclab.app import AppLauncher  # 从IsaacLab导入应用启动器
 
 from legged_lab.utils import task_registry  # 导入任务注册表，用于获取环境配置和类
-from rsl_rl.runners import AmpOnPolicyRunner, OnPolicyRunner  # 导入PPO训练运行器
+from rsl_rl.runners import AmpOnPolicyRunner, OnPolicyRunner, SawOnPolicyRunner  # 导入PPO训练运行器
 
 # local imports
 import legged_lab.utils.cli_args as cli_args  # isort: skip  # 导入命令行参数处理工具
@@ -35,6 +35,16 @@ parser.add_argument("--num_envs", type=int, default=None, help="Number of enviro
 # 添加随机种子参数
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
 
+# 添加视频录制参数
+parser.add_argument("--enable_video_recording", action="store_true", default=False,
+                    help="Enable video recording during training.")
+parser.add_argument("--video_interval", type=int, default=500,
+                    help="Interval (in steps) between video recordings.")
+parser.add_argument("--video_num_frames", type=int, default=500,
+                    help="Number of frames per video recording.")
+parser.add_argument("--video_output_dir", type=str, default="videos",
+                    help="Directory to save video recordings.")
+
 # 追加RSL-RL相关的命令行参数
 cli_args.add_rsl_rl_args(parser)
 # 追加AppLauncher相关的命令行参数
@@ -43,6 +53,10 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 # 如果任务名称包含"sensor"，则启用相机渲染
 if "sensor" in args_cli.task:
+    args_cli.enable_cameras = True
+
+# 如果启用了视频录制，必须启用相机渲染
+if args_cli.enable_video_recording:
     args_cli.enable_cameras = True
 
 # 启动Omniverse应用程序
@@ -70,7 +84,7 @@ torch.backends.cudnn.benchmark = False  # 禁用cuDNN自动寻找最佳卷积算
 
 def train():
     # 定义运行器类型注解
-    runner: OnPolicyRunner | AmpOnPolicyRunner
+    runner: OnPolicyRunner | AmpOnPolicyRunner | SawOnPolicyRunner
 
     # 获取任务类名
     env_class_name = args_cli.task
@@ -99,6 +113,19 @@ def train():
         env_cfg.scene.seed = seed
         agent_cfg.seed = seed
 
+    # 配置视频录制参数（如果启用）
+    if args_cli.enable_video_recording:
+        # 检查环境配置是否有video_recorder属性
+        if hasattr(env_cfg, 'video_recorder'):
+            env_cfg.video_recorder.enable = True
+            env_cfg.video_recorder.interval = args_cli.video_interval
+            env_cfg.video_recorder.num_frames = args_cli.video_num_frames
+            env_cfg.video_recorder.output_dir = args_cli.video_output_dir
+            print(f"[INFO] Video recording enabled:")
+            print(f"  - Interval: {args_cli.video_interval} steps")
+            print(f"  - Num frames: {args_cli.video_num_frames}")
+            print(f"  - Output dir: {args_cli.video_output_dir}")
+
     # 创建环境实例
     env = env_class(env_cfg, args_cli.headless)
 
@@ -114,7 +141,7 @@ def train():
         log_dir += f"_{agent_cfg.run_name}"
     log_dir = os.path.join(log_root_path, log_dir)
     # 根据配置的运行器类名创建运行器实例
-    runner_class: OnPolicyRunner | AmpOnPolicyRunner = eval(agent_cfg.runner_class_name)
+    runner_class: OnPolicyRunner | AmpOnPolicyRunner | SawOnPolicyRunner= eval(agent_cfg.runner_class_name)
     runner = runner_class(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
 
     # 如果配置了从检查点恢复训练

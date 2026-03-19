@@ -20,5 +20,6 @@
 
 from .replay_buffer import ReplayBuffer
 from .rollout_storage import RolloutStorage
+from .saw_rollout_storage import StandAndWalkRolloutStorage
 
-__all__ = ["RolloutStorage", "ReplayBuffer"]
+__all__ = ["RolloutStorage", "StandAndWalkRolloutStorage", "ReplayBuffer"]

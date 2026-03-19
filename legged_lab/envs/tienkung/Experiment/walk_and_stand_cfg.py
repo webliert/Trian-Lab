@@ -32,11 +32,15 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import (  # noqa:F401
     RslRlOnPolicyRunnerCfg,
-    RslRlPpoActorCriticCfg,
+    RslRlPpoActorCriticRecurrentCfg,
     RslRlPpoAlgorithmCfg,
     RslRlRndCfg,
     RslRlSymmetryCfg,
 )
+
+
+# Import SaW controller modules
+from rsl_rl.modules.actor_critic_saw import ActorCriticSaW
 
 import legged_lab.mdp as mdp
 from legged_lab.assets.tienkung2_lite import TIENKUNG2LITE_CFG
@@ -57,478 +61,78 @@ from legged_lab.envs.base.base_config import (
     SimCfg,
 )
 from legged_lab.terrains import GRAVEL_TERRAINS_CFG, ROUGH_TERRAINS_CFG  # noqa:F401
+from legged_lab.utils.video_recorder import VideoRecorderCfg, VideoRecorderCameraCfg
 
 
 @configclass
-class GaitCfg:
-    """步态配置类 / Gait Configuration Class
+class WalkAndStandRewardCfg:
+    """行走和站立奖励配置类 / Walk and Stand Reward Configuration Class
     
-    定义机器人行走时的步态参数，包括空中相位比例、相位偏移和步态周期。
-    Defines gait parameters for robot walking, including air phase ratio, phase offset, and gait cycle.
+    定义行走和站立任务中的奖励函数配置，包括基于论文设计的核心奖励项和原有兼容奖励项。
+    Defines reward function configuration for walk and stand tasks, including paper-based core rewards and original compatible rewards.
+    
+    ===============================================================================
+    基于论文的最小约束奖励函数配置
+    Minimal Constraint Reward Function Configuration based on Paper Design
+    ===============================================================================
+    
+    REWARD_WEIGHTS = {
+        "xy_velocity": 0.15,          # XY速度跟踪权重
+        "yaw_orientation": 0.1,       # 偏航角跟踪权重
+        "roll_pitch_orientation": 0.2,  # 滚转/俯仰角权重
+        "feet_contact": 0.1,          # 足底接触权重
+        "base_height": 0.05,         # 基座高度权重
+        "feet_airtime": 1.0,         # 足底腾空时间权重（正向奖励）
+        "feet_orientation": 0.05,     # 足底姿态权重
+        "feet_position": 0.05,        # 足底位置权重
+        "arm": 0.03,                 # 手臂角度权重
+        "base_acceleration": 0.1,     # 基座加速度权重
+        "action_difference": 0.02,    # 动作差分权重
+        "torque": 0.02               # 电机力矩权重
+    }
     """
     
-    # 左腿空中相位比例 / Left leg air phase ratio
-    gait_air_ratio_l: float = 0.38
-    
-    # 右腿空中相位比例 / Right leg air phase ratio
-    gait_air_ratio_r: float = 0.38
-    
-    # 左腿相位偏移 / Left leg phase offset
-    gait_phase_offset_l: float = 0.38
-    
-    # 右腿相位偏移 / Right leg phase offset
-    gait_phase_offset_r: float = 0.88
-    
-    # 步态周期 / Gait cycle
-    gait_cycle: float = 0.85
-
-
-@configclass
-class StandRewardCfg:
-    """站立奖励配置类 / Stand Reward Configuration Class
-    
-    定义站立任务中的奖励函数配置，包括保持身体直立、关节位置稳定等奖励项。
-    Defines reward function configuration for standing task, including body upright, joint position stability, etc.
-    """
-    
-    # 平坦朝向L2惩罚 - 保持身体直立 / Flat orientation L2 penalty - keep body upright
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-2.0)
-    
-    # 身体朝向L2惩罚 / Body orientation L2 penalty
-    body_orientation_l2 = RewTerm(
-        func=mdp.body_orientation_l2, params={"asset_cfg": SceneEntityCfg("robot", body_names="pelvis")}, weight=-2.0
-    )
-    
-    # 线性速度Z L2惩罚 - 防止上下浮动 / Linear velocity Z L2 penalty - prevent up/down movement
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-1.0)
-    
-    # 角速度XY L2惩罚 - 防止身体摇晃 / Angular velocity XY L2 penalty - prevent body swaying
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.1)
-    
-    # 能量消耗惩罚 / Energy consumption penalty
-    energy = RewTerm(func=mdp.energy, weight=-1e-3)
-    
-    # 关节加速度L2惩罚 - 使运动更平滑 / Joint acceleration L2 penalty - make movement smoother
-    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    
-    # 动作变化率L2惩罚 - 使控制更平滑 / Action rate L2 penalty - make control smoother
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
-    
-    # 关节位置限制惩罚 / Joint position limits penalty
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-2.0)
-    
-    # 关节位置偏差惩罚（站立时主要奖励保持默认关节位置）/ Joint position deviation penalty (mainly reward keeping default joint position during standing)
-    joint_deviation_hip = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.3,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "hip_yaw_.*_joint",
-                    "hip_roll_.*_joint",
-                    "shoulder_pitch_.*_joint",
-                    "elbow_pitch_.*_joint",
-                ],
-            )
-        },
-    )
-    
-    # 手臂关节偏差惩罚 / Arm joint deviation penalty
-    joint_deviation_arms = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.3,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_roll_.*_joint", "shoulder_yaw_.*_joint"])},
-    )
-    
-    # 腿部关节偏差惩罚 / Leg joint deviation penalty
-    joint_deviation_legs = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.2,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "hip_pitch_.*_joint",
-                    "knee_pitch_.*_joint",
-                    "ankle_pitch_.*_joint",
-                    "ankle_roll_.*_joint",
-                ],
-            )
-        },
-    )
-    
-    # 踝关节扭矩惩罚 / Ankle torque penalty
-    ankle_torque = RewTerm(func=mdp.ankle_torque, weight=-0.0005)
-    
-    # 踝关节动作惩罚 / Ankle action penalty
-    ankle_action = RewTerm(func=mdp.ankle_action, weight=-0.001)
-    
-    # 髋关节滚转动作惩罚 / Hip roll action penalty
-    hip_roll_action = RewTerm(func=mdp.hip_roll_action, weight=-1.0)
-    
-    # 髋关节偏航动作惩罚 / Hip yaw action penalty
-    hip_yaw_action = RewTerm(func=mdp.hip_yaw_action, weight=-1.0)
-    
-    # 终止惩罚 / Termination penalty
-    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
-    
-    # 非期望接触惩罚 / Undesired contacts penalty
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1.0,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_sensor", body_names=["knee_pitch.*", "shoulder_roll.*", "elbow_pitch.*", "pelvis"]
-            ),
-            "threshold": 1.0,
-        },
-    )
-    
-    # 脚部滑动惩罚 / Feet slide penalty
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=-0.25,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_sensor", body_names="ankle_roll.*"),
-            "asset_cfg": SceneEntityCfg("robot", body_names="ankle_roll.*"),
-        },
-    )
-    
-    # 脚部绊倒惩罚 / Feet stumble penalty
-    feet_stumble = RewTerm(
-        func=mdp.feet_stumble,
-        weight=-2.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_sensor", body_names=["ankle_roll.*"])},
-    )
-
-
-@configclass
-class WalkRewardCfg:
-    """行走奖励配置类 / Walk Reward Configuration Class
-    
-    定义行走任务中的奖励函数配置，包括跟踪速度命令、步态相关奖励等。
-    Defines reward function configuration for walking task, including tracking velocity commands, gait-related rewards, etc.
-    """
-    
-    # 跟踪线性速度XY指数奖励 / Track linear velocity XY exponential reward
-    track_lin_vel_xy_exp = RewTerm(func=mdp.track_lin_vel_xy_yaw_frame_exp, weight=1.0, params={"std": 0.5})
-    
-    # 跟踪角速度Z指数奖励 / Track angular velocity Z exponential reward
-    track_ang_vel_z_exp = RewTerm(func=mdp.track_ang_vel_z_world_exp, weight=1.0, params={"std": 0.5})
-    
-    # 线性速度Z L2惩罚 / Linear velocity Z L2 penalty
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-1.0)
-    
-    # 角速度XY L2惩罚 / Angular velocity XY L2 penalty
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    
-    # 能量消耗惩罚 / Energy consumption penalty
-    energy = RewTerm(func=mdp.energy, weight=-1e-3)
-    
-    # 关节加速度L2惩罚 / Joint acceleration L2 penalty
-    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    
-    # 动作变化率L2惩罚 / Action rate L2 penalty
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
-    
-    # 非期望接触惩罚 / Undesired contacts penalty
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1.0,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_sensor", body_names=["knee_pitch.*", "shoulder_roll.*", "elbow_pitch.*", "pelvis"]
-            ),
-            "threshold": 1.0,
-        },
-    )
-    
-    # 身体朝向L2惩罚 / Body orientation L2 penalty
-    body_orientation_l2 = RewTerm(
-        func=mdp.body_orientation_l2, params={"asset_cfg": SceneEntityCfg("robot", body_names="pelvis")}, weight=-2.0
-    )
-    
-    # 平坦朝向L2惩罚 / Flat orientation L2 penalty
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
-    
-    # 终止惩罚 / Termination penalty
-    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
-    
-    # 脚部滑动惩罚 / Feet slide penalty
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=-0.25,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_sensor", body_names="ankle_roll.*"),
-            "asset_cfg": SceneEntityCfg("robot", body_names="ankle_roll.*"),
-        },
-    )
-    
-    # 脚部力惩罚 / Feet force penalty
-    feet_force = RewTerm(
-        func=mdp.body_force,
-        weight=-3e-3,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_sensor", body_names="ankle_roll.*"),
-            "threshold": 500,
-            "max_reward": 400,
-        },
-    )
-    
-    # 脚部过近惩罚 / Feet too near penalty
-    feet_too_near = RewTerm(
-        func=mdp.feet_too_near_humanoid,
-        weight=-2.0,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names=["ankle_roll.*"]), "threshold": 0.2},
-    )
-    
-    # 脚部绊倒惩罚 / Feet stumble penalty
-    feet_stumble = RewTerm(
-        func=mdp.feet_stumble,
-        weight=-2.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_sensor", body_names=["ankle_roll.*"])},
-    )
-    
-    # 关节位置限制惩罚 / Joint position limits penalty
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-2.0)
-    
-    # 髋部关节偏差惩罚 / Hip joint deviation penalty
-    joint_deviation_hip = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.15,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "hip_yaw_.*_joint",
-                    "hip_roll_.*_joint",
-                    "shoulder_pitch_.*_joint",
-                    "elbow_pitch_.*_joint",
-                ],
-            )
-        },
-    )
-    
-    # 手臂关节偏差惩罚 / Arm joint deviation penalty
-    joint_deviation_arms = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.2,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_roll_.*_joint", "shoulder_yaw_.*_joint"])},
-    )
-    
-    # 腿部关节偏差惩罚 / Leg joint deviation penalty
-    joint_deviation_legs = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.02,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "hip_pitch_.*_joint",
-                    "knee_pitch_.*_joint",
-                    "ankle_pitch_.*_joint",
-                    "ankle_roll_.*_joint",
-                ],
-            )
-        },
-    )
-
-    # 步态脚力周期奖励 / Gait feet force periodic reward
-    gait_feet_frc_perio = RewTerm(func=mdp.gait_feet_frc_perio, weight=1.0, params={"delta_t": 0.02})
-    
-    # 步态脚速度周期奖励 / Gait feet speed periodic reward
-    gait_feet_spd_perio = RewTerm(func=mdp.gait_feet_spd_perio, weight=1.0, params={"delta_t": 0.02})
-    
-    # 步态脚力支撑周期奖励 / Gait feet force support periodic reward
-    gait_feet_frc_support_perio = RewTerm(func=mdp.gait_feet_frc_support_perio, weight=0.6, params={"delta_t": 0.02})
-
-    # 踝关节扭矩惩罚 / Ankle torque penalty
-    ankle_torque = RewTerm(func=mdp.ankle_torque, weight=-0.0005)
-    
-    # 踝关节动作惩罚 / Ankle action penalty
-    ankle_action = RewTerm(func=mdp.ankle_action, weight=-0.001)
-    
-    # 髋关节滚转动作惩罚 / Hip roll action penalty
-    hip_roll_action = RewTerm(func=mdp.hip_roll_action, weight=-1.0)
-    
-    # 髋关节偏航动作惩罚 / Hip yaw action penalty
-    hip_yaw_action = RewTerm(func=mdp.hip_yaw_action, weight=-1.0)
-    
-    # 脚部Y距离惩罚 / Feet Y distance penalty
-    feet_y_distance = RewTerm(func=mdp.feet_y_distance, weight=-2.0)
-
-
-@configclass
-class LiteRewardCfg:
-    """综合奖励配置类 / Integrated Reward Configuration Class
-    
-    定义行走+站立综合任务中的奖励函数配置，结合行走和站立两种模式的奖励。
-    Defines reward function configuration for walk+stand integrated task, combining walk and stand mode rewards.
-    """
-    
-    # ===== 站立相关奖励 / Stand-related rewards =====
-    # 平坦朝向L2惩罚 - 保持身体直立 / Flat orientation L2 penalty - keep body upright
-    # 增加权重以增强站立稳定性
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-3.0)
-    
-    # 身体朝向L2惩罚 / Body orientation L2 penalty
-    # 增加权重以增强站立稳定性
-    body_orientation_l2 = RewTerm(
-        func=mdp.body_orientation_l2, params={"asset_cfg": SceneEntityCfg("robot", body_names="pelvis")}, weight=-3.0
-    )
-    
-    # 线性速度Z L2惩罚 / Linear velocity Z L2 penalty
-    lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    
-    # 角速度XY L2惩罚 - 站立时特别重要 / Angular velocity XY L2 penalty - especially important for standing
-    ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.5)
-    
-    # 能量消耗惩罚 / Energy consumption penalty
-    energy = RewTerm(func=mdp.energy, weight=-1e-3)
-    
-    # 关节加速度L2惩罚 / Joint acceleration L2 penalty
-    dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    
-    # 动作变化率L2惩罚 / Action rate L2 penalty
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
-    
-    # 关节位置限制惩罚 / Joint position limits penalty
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-2.0)
-    
-    # 髋部关节偏差惩罚（站立时更关键）/ Hip joint deviation penalty (more critical during standing)
-    joint_deviation_hip = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.2,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "hip_yaw_.*_joint",
-                    "hip_roll_.*_joint",
-                    "shoulder_pitch_.*_joint",
-                    "elbow_pitch_.*_joint",
-                ],
-            )
-        },
-    )
-    
-    # 手臂关节偏差惩罚 / Arm joint deviation penalty
-    joint_deviation_arms = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.2,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=["shoulder_roll_.*_joint", "shoulder_yaw_.*_joint"])},
-    )
-    
-    # 腿部关节偏差惩罚 / Leg joint deviation penalty
-    joint_deviation_legs = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.02,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "hip_pitch_.*_joint",
-                    "knee_pitch_.*_joint",
-                    "ankle_pitch_.*_joint",
-                    "ankle_roll_.*_joint",
-                ],
-            )
-        },
-    )
-    
-    # 踝关节扭矩惩罚 / Ankle torque penalty
-    ankle_torque = RewTerm(func=mdp.ankle_torque, weight=-0.0005)
-    
-    # 踝关节动作惩罚 / Ankle action penalty
-    ankle_action = RewTerm(func=mdp.ankle_action, weight=-0.001)
-    
-    # 髋关节滚转动作惩罚 / Hip roll action penalty
-    hip_roll_action = RewTerm(func=mdp.hip_roll_action, weight=-1.0)
-    
-    # 髋关节偏航动作惩罚 / Hip yaw action penalty
-    hip_yaw_action = RewTerm(func=mdp.hip_yaw_action, weight=-1.0)
-    
-    # 终止惩罚 / Termination penalty
-    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
-    
-    # 非期望接触惩罚 / Undesired contacts penalty
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1.0,
-        params={
-            "sensor_cfg": SceneEntityCfg(
-                "contact_sensor", body_names=["knee_pitch.*", "shoulder_roll.*", "elbow_pitch.*", "pelvis"]
-            ),
-            "threshold": 1.0,
-        },
-    )
-    
-    # 脚部滑动惩罚 / Feet slide penalty
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=-0.25,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_sensor", body_names="ankle_roll.*"),
-            "asset_cfg": SceneEntityCfg("robot", body_names="ankle_roll.*"),
-        },
-    )
-    
-    # 脚部力惩罚 / Feet force penalty
-    feet_force = RewTerm(
-        func=mdp.body_force,
-        weight=-3e-3,
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_sensor", body_names="ankle_roll.*"),
-            "threshold": 500,
-            "max_reward": 400,
-        },
-    )
-    
-    # 脚部过近惩罚 / Feet too near penalty
-    feet_too_near = RewTerm(
-        func=mdp.feet_too_near_humanoid,
-        weight=-2.0,
-        params={"asset_cfg": SceneEntityCfg("robot", body_names=["ankle_roll.*"]), "threshold": 0.2},
-    )
-    
-    # 脚部绊倒惩罚 / Feet stumble penalty
-    feet_stumble = RewTerm(
-        func=mdp.feet_stumble,
-        weight=-2.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_sensor", body_names=["ankle_roll.*"])},
-    )
-    
-    # ===== 行走相关奖励 / Walk-related rewards =====
-    # 跟踪线性速度XY指数奖励 / Track linear velocity XY exponential reward
-    track_lin_vel_xy_exp = RewTerm(func=mdp.track_lin_vel_xy_yaw_frame_exp, weight=1.0, params={"std": 0.5})
-    
-    # 跟踪角速度Z指数奖励 / Track angular velocity Z exponential reward
-    track_ang_vel_z_exp = RewTerm(func=mdp.track_ang_vel_z_world_exp, weight=1.0, params={"std": 0.5})
-    
-    # 步态脚力周期奖励 / Gait feet force periodic reward
-    gait_feet_frc_perio = RewTerm(func=mdp.gait_feet_frc_perio, weight=1.0, params={"delta_t": 0.02})
-    
-    # 步态脚速度周期奖励 / Gait feet speed periodic reward
-    gait_feet_spd_perio = RewTerm(func=mdp.gait_feet_spd_perio, weight=1.0, params={"delta_t": 0.02})
-    
-    # 步态脚力支撑周期奖励 / Gait feet force support periodic reward
-    gait_feet_frc_support_perio = RewTerm(func=mdp.gait_feet_frc_support_perio, weight=0.6, params={"delta_t": 0.02})
-    
-    # 脚部Y距离惩罚 / Feet Y distance penalty
-    feet_y_distance = RewTerm(func=mdp.feet_y_distance, weight=-2.0)
+    # ==============================================================================
+    # 基于论文设计的核心奖励函数（最小约束）
+    # Core Reward Functions Based on Paper Design (Minimal Constraint)
+    # ==============================================================================
+    
+    # 正向奖励项 / Positive Reward Terms
+    # XY速度跟踪权重
+    xy_velocity = RewTerm(func=mdp.reward_xy_velocity, weight=0.15)
+    # 偏航角跟踪权重
+    yaw_orientation = RewTerm(func=mdp.reward_yaw_orientation, weight=0.1)
+    # 滚转/俯仰角权重
+    roll_pitch_orientation = RewTerm(func=mdp.reward_roll_pitch_orientation, weight=0.2)
+    # 足底接触权重
+    feet_contact = RewTerm(func=mdp.reward_feet_contact, weight=0.1)
+    # 基座高度权重
+    base_height = RewTerm(func=mdp.reward_base_height, weight=0.05)
+    # 足底腾空时间权重（正向奖励）
+    feet_airtime = RewTerm(func=mdp.reward_feet_airtime, weight=1.0)
+    # 足底姿态权重
+    feet_orientation = RewTerm(func=mdp.reward_feet_orientation, weight=0.05)
+    # 足底位置权重
+    feet_position = RewTerm(func=mdp.reward_feet_position, weight=0.05)
+    # 手臂角度权重
+    arm = RewTerm(func=mdp.reward_arm, weight=0.03)
+    
+    # 惩罚项 / Penalty Terms
+    # 基座加速度权重
+    base_acceleration = RewTerm(func=mdp.reward_base_acceleration, weight=0.1)
+    # 动作差分权重
+    action_difference = RewTerm(func=mdp.reward_action_difference, weight=0.02)
+    # 电机力矩权重
+    torque = RewTerm(func=mdp.reward_torque, weight=0.02)
 
 
 @configclass
 class TienKungWalkAndStandFlatEnvCfg:
     """天工机器人行走+站立平坦环境配置类 / TienKung Robot Walk and Stand Flat Environment Configuration Class
     
-    定义天工机器人在平坦地形上同时学习行走和站立的环境配置参数。
-    Defines environment configuration parameters for TienKung robot learning both walking and standing on flat terrain.
+    定义天工机器人在平坦地形上行走和站立的环境配置参数。
+    Defines environment configuration parameters for TienKung robot walking and standing on flat terrain.
     """
-    
-    # AMP运动文件显示路径 - 包含行走和站立两种动作 / AMP motion files display path - contains both walk and stand motions
-    amp_motion_files_display = ["legged_lab/envs/tienkung/datasets/motion_visualization/walk.txt"]
     
     # 计算设备 / Computing device
     device: str = "cuda:0"
@@ -564,10 +168,7 @@ class TienKungWalkAndStandFlatEnvCfg:
     )
     
     # 奖励配置 / Reward configuration
-    reward = LiteRewardCfg()
-    
-    # 步态配置 / Gait configuration
-    gait = GaitCfg()
+    reward = WalkAndStandRewardCfg()
     
     # 归一化配置 / Normalization configuration
     normalization: NormalizationCfg = NormalizationCfg(
@@ -593,7 +194,7 @@ class TienKungWalkAndStandFlatEnvCfg:
         # 增加站立环境比例 - 让更多环境处于站立状态 / Increase stand environment ratio - let more environments be in standing state
         # 修改为50%站立，50%行走，确保策略学习到良好的站立能力
         rel_standing_envs=0.5,  # 50% 环境站立，50% 环境行走 / 50% environments stand, 50% environments walk
-        rel_heading_envs=1.0,
+        rel_heading_envs=0.5,
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,  # 启用命令可视化 / Enable command visualization
@@ -677,6 +278,24 @@ class TienKungWalkAndStandFlatEnvCfg:
     
     # 仿真配置 / Simulation configuration
     sim: SimCfg = SimCfg(dt=0.005, decimation=4, physx=PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15))
+    
+    # 视频录制配置 / Video recording configuration
+    # 用于在无头训练模式下间隔录制训练视频
+    video_recorder: VideoRecorderCfg = VideoRecorderCfg(
+        enable=True,  # 默认关闭，可通过命令行启用
+        interval=500,  # 每500步录制一次
+        num_frames=500,  # 每次录制500帧
+        output_dir="videos",  # 输出目录
+        fps=30,  # 帧率
+        width=1280,  # 宽度
+        height=720,  # 高度
+        camera=VideoRecorderCameraCfg(
+            position=(2.0, -2.0, 1.8),  # 左前方位置
+            look_at=(0.0, 0.0, 0.5),  # 对准机器人中心
+            name="main_camera",
+            prim_path="/World/recording_camera"
+        )
+    )
 
 
 @configclass
@@ -685,6 +304,18 @@ class TienKungWalkAndStandAgentCfg(RslRlOnPolicyRunnerCfg):
     
     定义行走+站立任务的强化学习智能体配置参数，继承自RSL-RL策略运行器配置。
     Defines reinforcement learning agent configuration parameters for walk+stand task, inheriting from RSL-RL policy runner configuration.
+    
+    ===============================================================================
+    StandAndWalk控制器配置（基于论文设计）
+    StandAndWalk Controller Configuration (Based on Paper Design)
+    ===============================================================================
+    
+    SaW控制器特性：
+    - 架构：(64, 64)双层LSTM循环神经网络
+    - 输入：机器人状态（关节速度、位置、躯干方向）+ 用户命令 cu=[cx, cy, cyaw]
+    - 输出：20个关节空间的PD设定点
+    - 运行频率：50Hz (SaW控制器)，2kHz (PD控制器)
+    - 训练算法：近端策略优化 (PPO) + 镜像损失
     """
     
     # 随机种子 / Random seed
@@ -703,22 +334,28 @@ class TienKungWalkAndStandAgentCfg(RslRlOnPolicyRunnerCfg):
     empirical_normalization = False
     
     # 策略配置 / Policy configuration
-    policy = RslRlPpoActorCriticCfg(
-        class_name="ActorCritic",
+    # 使用StandAndWalk专用Actor-Critic (64, 64)双层LSTM
+    policy = RslRlPpoActorCriticRecurrentCfg(
+        class_name="ActorCriticSaW",
         init_noise_std=1.0,
         noise_std_type="scalar",
-        actor_hidden_dims=[512, 256, 128],
-        critic_hidden_dims=[512, 256, 128],
+        actor_hidden_dims=[256, 128],  # 简化MLP层，与论文设计一致
+        critic_hidden_dims=[256, 128],
         activation="elu",
+        # LSTM 配置 - 符合论文的 (64, 64) 双层 LSTM
+        rnn_type="lstm",              # 添加 LSTM 类型
+        rnn_hidden_dim=64,            # 64 维隐藏状态
+        rnn_num_layers=2,             # 2 层 LSTM
     )
     
     # 算法配置 / Algorithm configuration
+    # 使用SAWPPO (修复了RNN + 数据增强的tensor repeat问题) + 镜像损失以鼓励对称性
     algorithm = RslRlPpoAlgorithmCfg(
-        class_name="AMPPPO",
+        class_name="SAWPPO",
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.005,
+        entropy_coef=0.01,  # 增加熵系数以鼓励探索
         num_learning_epochs=5,
         num_mini_batches=4,
         learning_rate=1.0e-3,
@@ -728,8 +365,14 @@ class TienKungWalkAndStandAgentCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
         normalize_advantage_per_mini_batch=False,
-        symmetry_cfg=None,  # RslRlSymmetryCfg()
-        rnd_cfg=None,  # RslRlRndCfg()
+        # 镜像损失配置 - 鼓励对称行为
+        symmetry_cfg=RslRlSymmetryCfg(
+            use_data_augmentation=True,
+            use_mirror_loss=True,
+            mirror_loss_coeff=0.1,
+            data_augmentation_func="legged_lab.mdp.symmetry_augmentation:symmetry_augment_standing",
+        ),
+        rnd_cfg=None,
     )
     
     # 动作裁剪 / Action clipping
@@ -739,10 +382,10 @@ class TienKungWalkAndStandAgentCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 1000
     
     # 运行器类名 / Runner class name
-    runner_class_name = "AmpOnPolicyRunner"
+    runner_class_name = "SawOnPolicyRunner"
     
     # 实验名称 / Experiment name
-    experiment_name = "walk_and_stand"
+    experiment_name = "walk_and_stand_saw"
     
     # 运行名称 / Run name
     run_name = ""
@@ -751,10 +394,10 @@ class TienKungWalkAndStandAgentCfg(RslRlOnPolicyRunnerCfg):
     logger = "tensorboard"
     
     # Neptune项目 / Neptune project
-    neptune_project = "walk_and_stand"
+    neptune_project = "walk_and_stand_saw"
     
     # WandB项目 / WandB project
-    wandb_project = "walk_and_stand"
+    wandb_project = "walk_and_stand_saw"
     
     # 是否恢复训练 / Whether to resume training
     resume = False
@@ -765,11 +408,70 @@ class TienKungWalkAndStandAgentCfg(RslRlOnPolicyRunnerCfg):
     # 加载检查点 / Load checkpoint
     load_checkpoint = "model_.*.pt"
 
-    # AMP参数 / AMP parameters
-    amp_reward_coef = 0.3
-    # 使用行走动作数据 / Use walk motion data
-    amp_motion_files = ["legged_lab/envs/tienkung/datasets/motion_amp_expert/walk.txt"]
-    amp_num_preload_transitions = 200000
-    amp_task_reward_lerp = 0.7
-    amp_discr_hidden_dims = [1024, 512, 256]
-    min_normalized_std = [0.05] * 20
+
+@configclass
+class SaWCommandConfig:
+    """StandAndWalk命令配置类 / StandAndWalk Command Configuration Class
+    
+    定义用户命令类别和采样策略。
+    Defines user command categories and sampling strategies.
+    
+    论文描述的五种命令类别：
+    1. Standing (站立): cu = [0, 0, 0]
+    2. Walking in sagittal plane (矢状面行走): cx变化
+    3. Walking laterally (侧向行走): cy变化
+    4. Rotating in place (原地旋转): cyaw变化
+    5. Omnidirectional walking (全向行走): cx, cy, cyaw同时变化
+    """
+    
+    # 命令类别枚举
+    COMMAND_CATEGORIES = [
+        "standing",           # 站立
+        "sagittal_walk",     # 矢状面行走
+        "lateral_walk",      # 侧向行走
+        "rotation",           # 原地旋转
+        "omnidirectional",   # 全向行走
+    ]
+    
+    # 命令范围（论文指定）
+    # Command ranges (as specified in paper)
+    COMMAND_RANGES = {
+        "cx": (-0.5, 2.0),    # m/s, 前后方向速度
+        "cy": (-0.5, 0.5),    # m/s, 左右方向速度
+        "cyaw": (-0.5, 0.5),  # rad/s, 偏航角速度
+    }
+    
+    # 命令重采样时间范围（2-6秒）
+    resampling_time_range = (2.0, 6.0)  # seconds
+    
+    # 每个类别的采样概率（均匀分布）
+    category_weights = [0.2, 0.2, 0.2, 0.2, 0.2]  # 均匀分布
+
+
+@configclass
+class SaWRandomPushConfig:
+    """StandAndWalk随机推力配置类 / StandAndWalk Random Push Configuration Class
+    
+    定义随机推力参数，用于增强扰动 rejection能力。
+    Defines random push parameters for disturbance rejection capability.
+    
+    论文描述：
+    - 每帧1%概率受到随机推力
+    - 推力范围：200N到800N
+    - 持续时间：单个timestep (20ms)
+    """
+    
+    # 是否启用随机推力
+    enable = True
+    
+    # 推力概率（每帧）
+    push_probability = 0.01  # 1%
+    
+    # 推力范围（N）
+    force_range = (200.0, 800.0)  # N
+    
+    # 推力持续时间（timesteps）
+    force_duration_steps = 1  # 1 step = 20ms
+    
+    # 推力方向范围（弧度）
+    force_angle_range = (0.0, 2 * math.pi)  # 360度均匀分布

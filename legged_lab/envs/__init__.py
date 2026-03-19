@@ -51,6 +51,13 @@ from legged_lab.envs.tienkung.Experiment.walk_and_stand_cfg import (
     TienKungWalkAndStandAgentCfg,
     TienKungWalkAndStandFlatEnvCfg,
 )
+# Stand configuration (for fast standing learning with curriculum)
+from legged_lab.envs.tienkung.Experiment.stand_cfg import (
+    TienKungStandAgentCfg,
+    TienKungStandFlatEnvCfg,
+)
+from legged_lab.envs.tienkung.Robot.tienkung_env_stand import TienKungStandEnv
+from legged_lab.envs.tienkung.Robot.tienkung_env_walk_stand import TienKungWalkAndStandEnv
 
 from legged_lab.utils.task_registry import task_registry
 
@@ -71,5 +78,9 @@ task_registry.register(
 )
 # Register Walk and Stand task
 task_registry.register(
-    "walk_and_stand", TienKungEnv, TienKungWalkAndStandFlatEnvCfg(), TienKungWalkAndStandAgentCfg()
+    "walk_and_stand", TienKungWalkAndStandEnv, TienKungWalkAndStandFlatEnvCfg(), TienKungWalkAndStandAgentCfg()
+)
+# Register Stand task (fast standing learning, uses TienKungStandEnv without gait)
+task_registry.register(
+    "stand", TienKungStandEnv, TienKungStandFlatEnvCfg(), TienKungStandAgentCfg()
 )

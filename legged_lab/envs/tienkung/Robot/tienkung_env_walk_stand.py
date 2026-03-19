@@ -1,49 +1,3 @@
-# Copyright (c) 2021-2024, The RSL-RL Project Developers.
-# All rights reserved.
-# Original code is licensed under the BSD-3-Clause license.
-#
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
-# All rights reserved.
-#
-# Copyright (c) 2025-2026, The Legged Lab Project Developers.
-# All rights reserved.
-#
-# Copyright (c) 2025-2026, The TienKung-Lab Project Developers.
-# All rights reserved.
-# Modifications are licensed under the BSD-3-Clause license.
-#
-# This file contains code derived from the RSL-RL, Isaac Lab, and Legged Lab Projects,
-# with additional modifications by the TienKung-Lab Project,
-# and is distributed under the BSD-3-Clause license.
-
-"""
-天工机器人环境模块 / TienKung Robot Environment Module
-
-
-概述 / Overview:
---------------
-该模块实现了天工(TienKung)机器人的强化学习仿真环境，继承自RSL-RL的VecEnv接口。
-This module implements the reinforcement learning simulation environment for TienKung robot,
-inheriting from RSL-RL's VecEnv interface.
-
-主要功能 / Main Features:
------------------------
-1. 仿真环境搭建 - 基于Isaac Sim构建物理仿真环境
-2. 传感器管理 - 支持接触传感器、高度扫描仪、激光雷达、深度相机
-3. 运动控制 - 实现PD位置控制驱动的关节控制
-4. 奖励计算 - 集成奖励管理器计算多目标奖励
-5. 步态生成 - 内置相位参数生成周期性步态
-6. AMP支持 - 支持对抗性运动先验(Adversarial Motion Prior)
-
-支持的任务 / Supported Tasks:
--------------------------
-- walk: 行走任务
-- run: 奔跑任务  
-- walk_with_sensor: 带传感器融合的行走任务
-- run_with_sensor: 带传感器融合的奔跑任务
-
-"""
-
 # Isaac Lab仿真相关模块 / Isaac Lab simulation related modules
 import isaaclab.sim as sim_utils
 import isaacsim.core.utils.torch as torch_utils  # type: ignore
@@ -51,6 +5,7 @@ import isaacsim.core.utils.torch as torch_utils  # type: ignore
 # 数值计算库 / Numerical computation libraries
 import numpy as np
 import torch
+import math
 
 # Isaac Lab资产和场景模块 / Isaac Lab assets and scene modules
 from isaaclab.assets.articulation import Articulation
@@ -64,17 +19,16 @@ from isaaclab.sim import PhysxCfg, SimulationContext
 
 # Isaac Lab工具模块 / Isaac Lab utility modules
 from isaaclab.utils.buffers import CircularBuffer, DelayBuffer
-from isaaclab.utils.math import quat_apply, quat_conjugate, quat_rotate
+from isaaclab.utils.math import quat_apply, quat_conjugate, quat_rotate_inverse, yaw_quat
 
 # 科学计算库 / Scientific computing library
 from scipy.spatial.transform import Rotation
 
 # 天工实验室配置模块 / TienKung Lab configuration modules
-from legged_lab.envs.tienkung.Experiment.run_cfg import TienKungRunFlatEnvCfg
-from legged_lab.envs.tienkung.Experiment.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
-from legged_lab.envs.tienkung.Experiment.walk_cfg import TienKungWalkFlatEnvCfg
-from legged_lab.envs.tienkung.Experiment.walk_with_sensor_cfg import (
-    TienKungWalkWithSensorFlatEnvCfg,
+from legged_lab.envs.tienkung.Experiment.walk_and_stand_cfg import (
+    TienKungWalkAndStandFlatEnvCfg,
+    SaWCommandConfig,
+    SaWRandomPushConfig
 )
 from legged_lab.utils.env_utils.scene import SceneCfg
 
@@ -83,81 +37,22 @@ from rsl_rl.env import VecEnv
 from rsl_rl.utils import AMPLoaderDisplay
 
 
-class TienKungEnv(VecEnv):
-    """
-    天工机器人环境类 / TienKung Robot Environment Class
-    
-    继承自VecEnv，实现天工机器人的具体仿真环境和控制逻辑。
-    Inherits from VecEnv, implements specific simulation environment and control logic for TienKung robot.
-    
-    此类是整个仿真系统的核心，负责:
-    - 管理Isaac Sim物理仿真上下文
-    - 处理多环境并行情仿真
-    - 集成多种传感器(接触力、高度扫描、激光雷达、深度相机)
-    - 实现强化学习的观察-动作循环
-    - 计算奖励和判断回合终止条件
-    
-    This class is the core of the entire simulation system, responsible for:
-    - Managing Isaac Sim physics simulation context
-    - Handling parallel simulation of multiple environments
-    - Integrating multiple sensors (contact force, height scan, LiDAR, depth camera)
-    - Implementing reinforcement learning observation-action loop
-    - Computing rewards and determining episode termination conditions
-    """
-
+class TienKungWalkAndStandEnv(VecEnv):
     def __init__(
         self,
-        cfg: (
-            TienKungRunFlatEnvCfg
-            | TienKungWalkFlatEnvCfg
-            | TienKungWalkWithSensorFlatEnvCfg
-            | TienKungRunWithSensorFlatEnvCfg
-        ),
+        cfg: TienKungWalkAndStandFlatEnvCfg,
         headless: bool,
     ):
-        """
-        环境初始化 / Environment initialization
-        
-        初始化天工机器人仿真环境，包括物理仿真器、场景、智能体等核心组件。
-        Initializes TienKung robot simulation environment, including core components like
-        physics simulator, scene, agents, etc.
-        
-        Args:
-            cfg: 环境配置对象，支持多种配置类型 / Environment configuration object, supports multiple configuration types
-                  - TienKungRunFlatEnvCfg: 奔跑平坦地形配置
-                  - TienKungWalkFlatEnvCfg: 行走平坦地形配置  
-                  - TienKungWalkWithSensorFlatEnvCfg: 带传感器的行走配置
-                  - TienKungRunWithSensorFlatEnvCfg: 带传感器的奔跑配置
-            headless: 是否无头模式运行 / Whether to run in headless mode
-                     True: 不渲染图形界面，适合大规模训练
-                     False: 渲染图形界面，便于调试可视化
-        """
-        # 类型注解保存配置对象 / Type annotation for configuration object
-        self.cfg: (
-            TienKungRunFlatEnvCfg
-            | TienKungWalkFlatEnvCfg
-            | TienKungWalkWithSensorFlatEnvCfg
-            | TienKungRunWithSensorFlatEnvCfg
-        )
-
-        # 保存配置引用 / Save configuration reference
-        self.cfg = cfg
+        self.cfg : TienKungWalkAndStandFlatEnvCfg = cfg # 保存配置引用 / Save configuration reference
         self.headless = headless  # 是否无头模式 / Whether in headless mode
-        
-        # 计算设备设置 / Computing device settings
         self.device = self.cfg.device  # CUDA设备 / CUDA device
-        
         # 时间参数设置 / Time parameter settings
         # physics_dt: 物理仿真步长(默认0.005秒=5ms) / Physics simulation timestep
         self.physics_dt = self.cfg.sim.dt
         # step_dt: 决策步长 = decimation * physics_dt (默认4*0.005=0.02秒=20ms) / Decision step size
         self.step_dt = self.cfg.sim.decimation * self.cfg.sim.dt
-        
-        # 环境数量 / Number of environments
-        self.num_envs = self.cfg.scene.num_envs
-        
-        # 设置随机种子 / Set random seed
-        self.seed(cfg.scene.seed)
+        self.num_envs = self.cfg.scene.num_envs # 环境数量 / Number of environments
+        self.seed(cfg.scene.seed)   # 设置随机种子 / Set random seed
 
         """
         物理仿真配置 / Physics Simulation Configuration
@@ -275,19 +170,6 @@ class TienKungEnv(VecEnv):
         # 初始化环境 / Initialize environments
         self.reset(env_ids)
 
-        """
-        AMP运动加载器初始化 / AMP Motion Loader Initialization
-        ------------------------------------------------------
-        创建AMP运动数据显示加载器，用于可视化参考运动。
-        Create AMP motion display loader for visualizing reference motions.
-        """
-        self.amp_loader_display = AMPLoaderDisplay(
-            motion_files=self.cfg.amp_motion_files_display,  # AMP运动文件路径
-            device=self.device,                                # 计算设备
-            time_between_frames=self.physics_dt               # 帧间时间间隔
-        )
-        self.motion_len = self.amp_loader_display.trajectory_num_frames[0]
-
     """
     天工机器人环境实现模块 / TienKung Robot Environment Implementation Module
     
@@ -309,7 +191,6 @@ class TienKungEnv(VecEnv):
         
         - Observation buffer (historical observations)
         - Action buffer (action delay)
-        - Gait parameter buffer
         - Simulation state buffer
         """
         self.extras = {}
@@ -407,19 +288,6 @@ class TienKungEnv(VecEnv):
         self.left_arm_local_vec = torch.tensor([0.0, 0.0, -0.3], device=self.device).repeat((self.num_envs, 1))
         self.right_arm_local_vec = torch.tensor([0.0, 0.0, -0.3], device=self.device).repeat((self.num_envs, 1))
 
-        # Init gait parameter
-        self.gait_phase = torch.zeros(self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False)
-        self.gait_cycle = torch.full(
-            (self.num_envs,), self.cfg.gait.gait_cycle, dtype=torch.float, device=self.device, requires_grad=False
-        )
-        self.phase_ratio = torch.tensor(
-            [self.cfg.gait.gait_air_ratio_l, self.cfg.gait.gait_air_ratio_r], dtype=torch.float, device=self.device
-        ).repeat(self.num_envs, 1)
-        self.phase_offset = torch.tensor(
-            [self.cfg.gait.gait_phase_offset_l, self.cfg.gait.gait_phase_offset_r],
-            dtype=torch.float,
-            device=self.device,
-        ).repeat(self.num_envs, 1)
         self.action = torch.zeros(
             self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False
         )
@@ -431,124 +299,6 @@ class TienKungEnv(VecEnv):
         )
         self.init_obs_buffer()
 
-    def visualize_motion(self, time: float):
-        """
-        根据AMP运动捕捉数据在指定时间更新机器人仿真状态 / Update Robot Simulation State Based on AMP Motion Capture Data at Specified Time
-        
-        此函数用于可视化AMP参考运动，根据给定的时间从运动数据中获取相应的帧，
-        并将机器人关节位置、速度、根状态设置为该帧的数据。
-        
-        This function is used to visualize AMP reference motion, fetches the corresponding frame
-        from motion data based on given time, and sets robot joint positions, velocities, and root
-        state to the frame's data.
-        
-        主要应用场景 / Main Application Scenarios:
-        - AMP训练过程中的运动可视化
-        - 专家轨迹回放验证
-        - 运动质量评估
-        
-        - Motion visualization during AMP training
-        - Expert trajectory playback verification
-        - Motion quality evaluation
-        
-        Args:
-            time (float): 时间(秒)，要获取AMP运动帧的时间点 / Time (seconds), the time point to fetch AMP motion frame
-            
-        Returns:
-            torch.Tensor: 拼接的AMP观察值，包含关节位置、速度、手部和脚部位置
-                         / Concatenated AMP observations, including joint positions, velocities, hand and foot positions
-        """
-        visual_motion_frame = self.amp_loader_display.get_full_frame_at_time(0, time)
-        device = self.device
-
-        dof_pos = torch.zeros((self.num_envs, self.robot.num_joints), device=device)
-        dof_vel = torch.zeros((self.num_envs, self.robot.num_joints), device=device)
-
-        dof_pos[:, self.left_leg_ids] = visual_motion_frame[6:12]
-        dof_pos[:, self.right_leg_ids] = visual_motion_frame[12:18]
-        dof_pos[:, self.left_arm_ids] = visual_motion_frame[18:22]
-        dof_pos[:, self.right_arm_ids] = visual_motion_frame[22:26]
-
-        dof_vel[:, self.left_leg_ids] = visual_motion_frame[32:38]
-        dof_vel[:, self.right_leg_ids] = visual_motion_frame[38:44]
-        dof_vel[:, self.left_arm_ids] = visual_motion_frame[44:48]
-        dof_vel[:, self.right_arm_ids] = visual_motion_frame[48:52]
-
-        self.robot.write_joint_position_to_sim(dof_pos)
-        self.robot.write_joint_velocity_to_sim(dof_vel)
-
-        env_ids = torch.arange(self.num_envs, device=device)
-
-        root_pos = visual_motion_frame[:3].clone()
-        root_pos[2] += 0.3
-
-        euler = visual_motion_frame[3:6].cpu().numpy()
-        quat_xyzw = Rotation.from_euler("XYZ", euler, degrees=False).as_quat()  # [x, y, z, w]
-        quat_wxyz = torch.tensor(
-            [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]], dtype=torch.float32, device=device
-        )
-
-        lin_vel = visual_motion_frame[26:29].clone()
-        ang_vel = torch.zeros_like(lin_vel)
-
-        # root state: [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
-        root_state = torch.zeros((self.num_envs, 13), device=device)
-        root_state[:, 0:3] = torch.tile(root_pos.unsqueeze(0), (self.num_envs, 1))
-        root_state[:, 3:7] = torch.tile(quat_wxyz.unsqueeze(0), (self.num_envs, 1))
-        root_state[:, 7:10] = torch.tile(lin_vel.unsqueeze(0), (self.num_envs, 1))
-        root_state[:, 10:13] = torch.tile(ang_vel.unsqueeze(0), (self.num_envs, 1))
-
-        self.robot.write_root_state_to_sim(root_state, env_ids)
-        self.sim.render()
-        self.sim.step()
-        self.scene.update(dt=self.step_dt)
-
-        left_hand_pos = (
-            self.robot.data.body_state_w[:, self.elbow_body_ids[0], :3]
-            - self.robot.data.root_state_w[:, 0:3]
-            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
-        )
-        right_hand_pos = (
-            self.robot.data.body_state_w[:, self.elbow_body_ids[1], :3]
-            - self.robot.data.root_state_w[:, 0:3]
-            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
-        )
-        left_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), left_hand_pos)
-        right_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), right_hand_pos)
-        left_foot_pos = (
-            self.robot.data.body_state_w[:, self.feet_body_ids[0], :3] - self.robot.data.root_state_w[:, 0:3]
-        )
-        right_foot_pos = (
-            self.robot.data.body_state_w[:, self.feet_body_ids[1], :3] - self.robot.data.root_state_w[:, 0:3]
-        )
-        left_foot_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), left_foot_pos)
-        right_foot_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), right_foot_pos)
-
-        self.left_leg_dof_pos =  dof_pos[:, self.left_leg_ids] 
-        self.right_leg_dof_pos = dof_pos[:, self.right_leg_ids]
-        self.left_leg_dof_vel =  dof_vel[:, self.left_leg_ids] 
-        self.right_leg_dof_vel = dof_vel[:, self.right_leg_ids]
-        self.left_arm_dof_pos =  dof_pos[:, self.left_arm_ids] 
-        self.right_arm_dof_pos = dof_pos[:, self.right_arm_ids]
-        self.left_arm_dof_vel =  dof_vel[:, self.left_arm_ids] 
-        self.right_arm_dof_vel = dof_vel[:, self.right_arm_ids]
-        return torch.cat(
-            (
-                self.right_arm_dof_pos,
-                self.left_arm_dof_pos,
-                self.right_leg_dof_pos,
-                self.left_leg_dof_pos,
-                self.right_arm_dof_vel,
-                self.left_arm_dof_vel,
-                self.right_leg_dof_vel,
-                self.left_leg_dof_vel,
-                left_hand_pos,
-                right_hand_pos,
-                left_foot_pos,
-                right_foot_pos
-            ),
-            dim=-1,
-        )
 
     def compute_current_observations(self) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -567,9 +317,6 @@ class TienKungEnv(VecEnv):
         - 关节位置 (20维): 相对于默认位置的关节角度
         - 关节速度 (20维): 关节角速度
         - 动作 (20维): 上一时刻执行的动作
-        - 步态相位正弦 (2维): 左右腿步态相位的正弦值
-        - 步态相位余弦 (2维): 左右腿步态相位的余弦值
-        - 相位比例 (2维): 左右腿空中相位比例
         
         Actor Observations (single step):
         - Angular velocity (3D): Robot base angular velocity in body frame
@@ -578,9 +325,6 @@ class TienKungEnv(VecEnv):
         - Joint positions (20D): Joint angles relative to default positions
         - Joint velocities (20D): Joint angular velocities
         - Actions (20D): Actions executed at previous timestep
-        - Gait phase sine (2D): Sine of gait phase for left/right legs
-        - Gait phase cosine (2D): Cosine of gait phase for left/right legs
-        - Phase ratio (2D): Air phase ratio for left/right legs
         
         Critic观察值:
         在Actor观察值基础上额外添加:
@@ -628,9 +372,6 @@ class TienKungEnv(VecEnv):
                 joint_pos * self.obs_scales.joint_pos,  # 20
                 joint_vel * self.obs_scales.joint_vel,  # 20
                 action * self.obs_scales.actions,  # 20
-                torch.sin(2 * torch.pi * self.gait_phase),  # 2 - 步态相位正弦 / Gait phase sine
-                torch.cos(2 * torch.pi * self.gait_phase),  # 2 - 步态相位余弦 / Gait phase cosine
-                self.phase_ratio,  # 2 - 相位比例 / Phase ratio
             ],
             dim=-1,
         )
@@ -913,8 +654,6 @@ class TienKungEnv(VecEnv):
 
         # 更新回合长度 / Update episode length
         self.episode_length_buf += 1
-        # 更新步态参数 / Update gait parameters
-        self._calculate_gait_para()
 
         # 更新命令生成器 / Update command generator
         self.command_generator.compute(self.step_dt)
@@ -1081,76 +820,6 @@ class TienKungEnv(VecEnv):
         self.extras["observations"] = {"critic": critic_obs}
         return actor_obs, self.extras
 
-    def get_amp_obs_for_expert_trans(self) -> torch.Tensor:
-        """
-        获取AMP专家观察值 / Get AMP Expert Observations
-        
-        用于AMP(对抗性运动先验)训练中获取专家轨迹的观察值。
-        Used in AMP (Adversarial Motion Prior) training to obtain observations for expert trajectories.
-        
-        返回包含四肢关节位置、速度以及手部和脚部在世界坐标系中位置的观察值。
-        Returns observations including limb joint positions, velocities, and hand/foot positions in world coordinates.
-        
-        Returns:
-            torch.Tensor: 拼接的AMP观察值 / Concatenated AMP observations
-        """
-        # 计算手部位置(相对于机体系) / Calculate hand positions (relative to body frame)
-        left_hand_pos = (
-            self.robot.data.body_state_w[:, self.elbow_body_ids[0], :3]
-            - self.robot.data.root_state_w[:, 0:3]
-            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
-        )
-        right_hand_pos = (
-            self.robot.data.body_state_w[:, self.elbow_body_ids[1], :3]
-            - self.robot.data.root_state_w[:, 0:3]
-            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
-        )
-        
-        # 转换到基座坐标系 / Transform to base frame
-        left_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), left_hand_pos)
-        right_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), right_hand_pos)
-        
-        # 计算脚部位置(相对于机体系) / Calculate foot positions (relative to body frame)
-        left_foot_pos = (
-            self.robot.data.body_state_w[:, self.feet_body_ids[0], :3] - self.robot.data.root_state_w[:, 0:3]
-        )
-        right_foot_pos = (
-            self.robot.data.body_state_w[:, self.feet_body_ids[1], :3] - self.robot.data.root_state_w[:, 0:3]
-        )
-        
-        # 转换到基座坐标系 / Transform to base frame
-        left_foot_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), left_foot_pos)
-        right_foot_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), right_foot_pos)
-        
-        # 获取关节位置和速度 / Get joint positions and velocities
-        self.left_leg_dof_pos = self.robot.data.joint_pos[:, self.left_leg_ids]
-        self.right_leg_dof_pos = self.robot.data.joint_pos[:, self.right_leg_ids]
-        self.left_leg_dof_vel = self.robot.data.joint_vel[:, self.left_leg_ids]
-        self.right_leg_dof_vel = self.robot.data.joint_vel[:, self.right_leg_ids]
-        self.left_arm_dof_pos = self.robot.data.joint_pos[:, self.left_arm_ids]
-        self.right_arm_dof_pos = self.robot.data.joint_pos[:, self.right_arm_ids]
-        self.left_arm_dof_vel = self.robot.data.joint_vel[:, self.left_arm_ids]
-        self.right_arm_dof_vel = self.robot.data.joint_vel[:, self.right_arm_ids]
-        
-        # 拼接所有AMP观察值 / Concatenate all AMP observations
-        return torch.cat(
-            (
-                self.right_arm_dof_pos,
-                self.left_arm_dof_pos,
-                self.right_leg_dof_pos,
-                self.left_leg_dof_pos,
-                self.right_arm_dof_vel,
-                self.left_arm_dof_vel,
-                self.right_leg_dof_vel,
-                self.left_leg_dof_vel,
-                left_hand_pos,
-                right_hand_pos,
-                left_foot_pos,
-                right_foot_pos
-            ),
-            dim=-1,
-        )
-
     @staticmethod
     def seed(seed: int = -1) -> int:
         """
@@ -1176,22 +845,321 @@ class TienKungEnv(VecEnv):
         # 设置PyTorch和NumPy的种子 / Set PyTorch and NumPy seeds
         return torch_utils.set_seed(seed)
 
-    def _calculate_gait_para(self) -> None:
+
+    # ==============================================================================
+    # StandAndWalk (SaW) 控制器特定功能
+    # StandAndWalk (SaW) Controller Specific Functions
+    # ==============================================================================
+    
+    def init_saw_buffers(self):
         """
-        计算步态参数 / Calculate Gait Parameters
+        初始化SaW控制器专用缓冲区。
+        Initialize buffers specific to SaW controller.
         
-        根据仿真时间和相位偏移更新步态相位。
-        Updates gait phase based on simulation time and phase offset.
-        
-        步态相位是一个周期性参数，范围[0, 1]，表示行走周期中的当前位置。
-        Gait phase is a periodic parameter in range [0, 1], indicating current position in walking cycle.
-        
-        左腿和右腿可以有不同的相位偏移，以实现不同的步态模式(如对角步、跑步等)。
-        Left and right legs can have different phase offsets to achieve different gait patterns (e.g., trot, run, etc.).
+        包括：
+        - 命令类别缓冲区
+        - 命令重采样计时器
+        - 随机推力状态
         """
-        # 计算归一化时间 / Calculate normalized time
-        t = self.episode_length_buf * self.step_dt / self.gait_cycle
+        # 命令类别配置
+        self.command_categories = SaWCommandConfig.COMMAND_CATEGORIES
+        self.command_ranges = SaWCommandConfig.COMMAND_RANGES
+        self.command_resample_range = SaWCommandConfig.resampling_time_range
+        self.category_weights = SaWCommandConfig.category_weights
         
-        # 更新左右腿的步态相位 / Update gait phase for left and right legs
-        self.gait_phase[:, 0] = (t + self.phase_offset[:, 0]) % 1.0
-        self.gait_phase[:, 1] = (t + self.phase_offset[:, 1]) % 1.0
+        # 初始化命令类别（每个环境一个类别）
+        self.command_category_buf = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        
+        # 初始化命令重采样计时器
+        self.command_timer_buf = torch.zeros(
+            self.num_envs, dtype=torch.float, device=self.device
+        )
+        
+        # 随机推力配置
+        self.push_config = SaWRandomPushConfig()
+        
+        # 初始化推力状态
+        self.current_push_force = torch.zeros(
+            (self.num_envs, 3), dtype=torch.float, device=self.device
+        )
+        self.push_active = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        
+        # 初始化躯干方向观察（用于SaW控制器的输入）
+        self.torso_orientation = torch.zeros(
+            (self.num_envs, 4), dtype=torch.float, device=self.device  # 四元数
+        )
+    
+    def sample_command_category(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """
+        从五种命令类别中均匀采样一个新类别。
+        Sample a new category uniformly from five command categories.
+        
+        五种命令类别：
+        1. Standing (站立): cu = [0, 0, 0]
+        2. Walking in sagittal plane (矢状面行走): cx变化
+        3. Walking laterally (侧向行走): cy变化
+        4. Rotating in place (原地旋转): cyaw变化
+        5. Omnidirectional walking (全向行走): cx, cy, cyaw同时变化
+        
+        Args:
+            env_ids: 需要采样类别的环境ID
+            
+        Returns:
+            采样的类别索引
+        """
+        num_categories = len(self.command_categories)
+        samples = torch.randint(
+            0, num_categories, 
+            size=(len(env_ids),), 
+            device=self.device
+        )
+        self.command_category_buf[env_ids] = samples
+        return samples
+    
+    def sample_command_for_category(self, category: int, num_envs: int) -> torch.Tensor:
+        """
+        根据指定类别生成对应的命令值。
+        Generate command values based on specified category.
+        
+        Args:
+            category: 命令类别索引 (0-4)
+            num_envs: 需要生成命令的环境数量
+            
+        Returns:
+            命令张量 [num_envs, 3] - [cx, cy, cyaw]
+        """
+        commands = torch.zeros((num_envs, 3), device=self.device)
+        cx_range = self.command_ranges["cx"]
+        cy_range = self.command_ranges["cy"]
+        cyaw_range = self.command_ranges["cyaw"]
+        
+        if category == 0:  # Standing
+            # cu = [0, 0, 0]
+            commands[:, 0] = 0.0
+            commands[:, 1] = 0.0
+            commands[:, 2] = 0.0
+            
+        elif category == 1:  # Sagittal walk (前后行走)
+            # cx变化, cy=0, cyaw=0
+            commands[:, 0] = torch.rand(num_envs, device=self.device) * (cx_range[1] - cx_range[0]) + cx_range[0]
+            commands[:, 1] = 0.0
+            commands[:, 2] = 0.0
+            
+        elif category == 2:  # Lateral walk (侧向行走)
+            # cx=0, cy变化, cyaw=0
+            commands[:, 0] = 0.0
+            commands[:, 1] = torch.rand(num_envs, device=self.device) * (cy_range[1] - cy_range[0]) + cy_range[0]
+            commands[:, 2] = 0.0
+            
+        elif category == 3:  # Rotation (原地旋转)
+            # cx=0, cy=0, cyaw变化
+            commands[:, 0] = 0.0
+            commands[:, 1] = 0.0
+            commands[:, 2] = torch.rand(num_envs, device=self.device) * (cyaw_range[1] - cyaw_range[0]) + cyaw_range[0]
+            
+        elif category == 4:  # Omnidirectional (全向行走)
+            # cx, cy, cyaw同时变化
+            commands[:, 0] = torch.rand(num_envs, device=self.device) * (cx_range[1] - cx_range[0]) + cx_range[0]
+            commands[:, 1] = torch.rand(num_envs, device=self.device) * (cy_range[1] - cy_range[0]) + cy_range[0]
+            commands[:, 2] = torch.rand(num_envs, device=self.device) * (cyaw_range[1] - cyaw_range[0]) + cyaw_range[0]
+        
+        return commands
+    
+    def resample_commands(self, env_ids: torch.Tensor):
+        """
+        为指定环境重新采样命令。
+        Resample commands for specified environments.
+        
+        1. 采样新的命令类别
+        2. 根据类别生成对应的命令值
+        3. 重置命令计时器
+        
+        Args:
+            env_ids: 需要重新采样命令的环境ID
+        """
+        # 采样新的命令类别
+        new_categories = self.sample_command_category(env_ids)
+        
+        # 为每个环境根据其类别生成命令
+        num_envs = len(env_ids)
+        new_commands = torch.zeros((num_envs, 3), device=self.device)
+        
+        cx_range = self.command_ranges["cx"]
+        cy_range = self.command_ranges["cy"]
+        cyaw_range = self.command_ranges["cyaw"]
+        
+        # 遍历每个环境，根据其类别生成命令
+        for i, env_id in enumerate(env_ids):
+            category = new_categories[i].item()  # 转换为Python int
+            
+            if category == 0:  # Standing
+                new_commands[i] = torch.tensor([0.0, 0.0, 0.0], device=self.device)
+            elif category == 1:  # Sagittal walk
+                cx = torch.rand(1, device=self.device) * (cx_range[1] - cx_range[0]) + cx_range[0]
+                new_commands[i] = torch.cat([cx, torch.zeros(2, device=self.device)])
+            elif category == 2:  # Lateral walk
+                cy = torch.rand(1, device=self.device) * (cy_range[1] - cy_range[0]) + cy_range[0]
+                new_commands[i] = torch.tensor([0.0, cy.item(), 0.0], device=self.device)
+            elif category == 3:  # Rotation
+                cyaw = torch.rand(1, device=self.device) * (cyaw_range[1] - cyaw_range[0]) + cyaw_range[0]
+                new_commands[i] = torch.tensor([0.0, 0.0, cyaw.item()], device=self.device)
+            elif category == 4:  # Omnidirectional
+                cx = torch.rand(1, device=self.device) * (cx_range[1] - cx_range[0]) + cx_range[0]
+                cy = torch.rand(1, device=self.device) * (cy_range[1] - cy_range[0]) + cy_range[0]
+                cyaw = torch.rand(1, device=self.device) * (cyaw_range[1] - cyaw_range[0]) + cyaw_range[0]
+                new_commands[i] = torch.cat([cx, cy, cyaw])
+        
+        # 更新命令生成器
+        self.command_generator.command[env_ids] = new_commands
+        
+        # 重置命令计时器（在2-6秒范围内随机）
+        new_timer = torch.rand(len(env_ids), device=self.device) * (
+            self.command_resample_range[1] - self.command_resample_range[0]
+        ) + self.command_resample_range[0]
+        self.command_timer_buf[env_ids] = new_timer
+    
+    def apply_random_push(self):
+        """
+        应用随机推力以增强扰动 rejection 能力。
+        Apply random pushes to enhance disturbance rejection capability.
+        
+        论文描述：
+        - 每帧1%概率受到随机推力
+        - 推力范围：200N到800N
+        - 持续时间：单个timestep (20ms)
+        - 方向：360度均匀分布
+        
+        这个函数应该在每个step的物理仿真循环中调用。
+        """
+        if not self.push_config.enable:
+            return
+        
+        num_envs = self.num_envs
+        
+        # 为每个环境生成随机数来决定是否施加推力
+        push_rand = torch.rand(num_envs, device=self.device)
+        
+        # 识别需要施加新推力的环境（1%概率）
+        new_push_envs = push_rand < self.push_config.push_probability
+        
+        # 为新推力环境生成推力值
+        if new_push_envs.any():
+            new_push_indices = new_push_envs.nonzero(as_tuple=False).flatten()
+            num_new = len(new_push_indices)
+            
+            # 生成推力大小 (200-800N)
+            force_magnitude = torch.rand(num_new, device=self.device) * (
+                self.push_config.force_range[1] - self.push_config.force_range[0]
+            ) + self.push_config.force_range[0]
+            
+            # 生成推力方向 (360度)
+            force_angle = torch.rand(num_new, device=self.device) * 2 * math.pi
+            
+            # 在x-y平面内计算推力向量
+            force_x = force_magnitude * torch.cos(force_angle)
+            force_y = force_magnitude * torch.sin(force_angle)
+            
+            # 设置推力（沿用之前的z方向）
+            self.current_push_force[new_push_indices, 0] = force_x
+            self.current_push_force[new_push_indices, 1] = force_y
+            self.current_push_force[new_push_indices, 2] = 0.0
+            
+            # 激活推力
+            self.push_active[new_push_indices] = True
+        
+        # 应用推力到机器人基座
+        if self.push_active.any():
+            push_env_ids = self.push_active.nonzero(as_tuple=False).flatten()
+            
+            # 获取机器人根节点的位置
+            root_pos = self.robot.data.root_pos_w[push_env_ids]
+            
+            # 对每个环境应用推力
+            for i, env_id in enumerate(push_env_ids):
+                force = self.current_push_force[env_id]
+                # 在世界坐标系下应用力
+                self.robot.set_external_force_at_body(
+                    force,
+                    body_name="pelvis",
+                    position=torch.zeros(3, device=self.device),  # 力作用在质心
+                    env_ids=[env_id.item()]
+                )
+            
+            # 推力只持续一个timestep，因此之后关闭
+            self.push_active[push_env_ids] = False
+    
+    def update_saw_commands(self, dt: float):
+        """
+        更新SaW控制器命令。
+        Update SaW controller commands.
+        
+        检查命令计时器，对需要重采样的环境进行命令重采样。
+        
+        Args:
+            dt: 时间步长
+        """
+        # 更新命令计时器
+        self.command_timer_buf -= dt
+        
+        # 找出需要重采样的环境（计时器 <= 0）
+        resample_mask = self.command_timer_buf <= 0
+        
+        if resample_mask.any():
+            resample_env_ids = resample_mask.nonzero(as_tuple=False).flatten()
+            self.resample_commands(resample_env_ids)
+    
+    def compute_saw_observations(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        计算SaW控制器专用的观察值。
+        Compute SaW controller specific observations.
+        
+        SaW控制器的输入包括：
+        1. 机器人状态：
+           - 关节速度 (20维)
+           - 关节位置 (20维)
+           - 躯干方向 (4维四元数)
+        2. 用户命令：
+           - cu = [cx, cy, cyaw] (3维)
+        
+        输出：Actor观察值和Critic观察值
+        
+        Returns:
+            tuple[torch.Tensor, torch.Tensor]: (actor_observations, critic_observations)
+        """
+        robot = self.robot
+        
+        # 1. 机器人状态
+        # 关节速度 (20维)
+        joint_vel = robot.data.joint_vel - robot.data.default_joint_vel
+        
+        # 关节位置 (相对于默认位置，20维)
+        joint_pos = robot.data.joint_pos - robot.data.default_joint_pos
+        
+        # 躯干方向 (4维四元数)
+        torso_quat = robot.data.root_quat_w
+        
+        # 2. 用户命令
+        command = self.command_generator.command  # [cx, cy, cyaw]
+        
+        # 拼接Actor观察值
+        # [关节速度(20), 关节位置(20), 躯干方向(4), 命令(3)] = 47维
+        current_actor_obs = torch.cat([
+            joint_vel * self.obs_scales.joint_vel,      # 20
+            joint_pos * self.obs_scales.joint_pos,      # 20
+            torso_quat,                                  # 4
+            command * self.obs_scales.commands,         # 3
+        ], dim=-1)
+        
+        # Critic观察值在Actor基础上添加线速度
+        root_lin_vel = robot.data.root_lin_vel_b
+        current_critic_obs = torch.cat([
+            current_actor_obs,
+            root_lin_vel * self.obs_scales.lin_vel,   # 3
+        ], dim=-1)
+        
+        return current_actor_obs, current_critic_obs
+

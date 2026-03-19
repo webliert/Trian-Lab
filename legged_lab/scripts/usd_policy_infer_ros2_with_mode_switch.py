@@ -92,6 +92,7 @@ from legged_lab.utils import task_registry
 parser = argparse.ArgumentParser(description="Policy inference for TienKung robot in a USD environment with ROS2 mode switching.")
 parser.add_argument("--task", type=str, default="walk", help="Name of the task.")
 parser.add_argument("--policy_path", type=str, help="Path to model checkpoint exported as jit.", required=True)
+parser.add_argument("--stand_policy_path", type=str, default="./Exported_policy/stand_zero.pt", help="Path to stand model checkpoint (default: ./Exported_policy/stand_zero.pt).")
 parser.add_argument("--usd_path", type=str, default="./sense/museum/museum.usd", help="Path to custom USD environment file (default: ../sense/museum/museum.usd).")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to simulate.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
@@ -1712,7 +1713,17 @@ def main():
         file = io.BytesIO(memoryview(file_content).tobytes())
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
         policy = torch.jit.load(file, map_location=device)
-        print(f"[INFO] Loaded policy from: {policy_path}")
+        print(f"[INFO] Loaded walk policy from: {policy_path}")
+
+        # load the stand policy
+        stand_policy_path = os.path.abspath(args_cli.stand_policy_path)
+        stand_file_content = omni.client.read_file(stand_policy_path)[2]
+        stand_file = io.BytesIO(memoryview(stand_file_content).tobytes())
+        stand_policy = torch.jit.load(stand_file, map_location=device)
+        print(f"[INFO] Loaded stand policy from: {stand_policy_path}")
+        
+        # Current active policy
+        current_policy = policy
 
         # get environment configuration
         env_class_name = args_cli.task
@@ -1975,10 +1986,19 @@ def main():
                 current_mode = "walk"
                 if mode_switch_subscriber is not None:
                     current_mode = mode_switch_subscriber.get_mode()
+                    print(f"[DEBUG] Current mode from ROS2: {current_mode}")
                 
                 # Check for mode change
                 if current_mode != prev_mode:
                     print(f"[INFO] Mode changed: {prev_mode} -> {current_mode}")
+                    
+                    # Switch the active policy based on mode
+                    if current_mode == "stand":
+                        current_policy = stand_policy
+                        print("[INFO] Switched to stand policy for inference")
+                    else:
+                        current_policy = policy
+                        print("[INFO] Switched to walk policy for inference")
                     
                     # If switching to stand mode, modify gait parameters
                     if current_mode == "stand" and has_gait_params:
@@ -1990,8 +2010,8 @@ def main():
                         env.gait_phase[:, 0] = 0.0
                         env.gait_phase[:, 1] = 0.0
                         # Set phase offsets to 0
-                        env.phase_offset[:, 0] = 0.0
-                        env.phase_offset[:, 1] = 0.0
+                        env.phase_offset[:, 0] = 1.0
+                        env.phase_offset[:, 1] = 1.0
                         print("[INFO] Gait parameters set for standing: phase_ratio=0, gait_phase=0, phase_offset=0")
                     
                     # If switching to walk mode, restore gait parameters
@@ -2067,7 +2087,8 @@ def main():
                 env.command_generator.command[:, 1] = lin_vel_y
                 env.command_generator.command[:, 2] = ang_vel_z
                 
-                action = policy(obs)
+                # Use the current active policy for inference
+                action = current_policy(obs)
                 obs, _, _, _ = env.step(action)
                 
                 # Update high-frequency IMU publisher with current robot state

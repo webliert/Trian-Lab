@@ -11,17 +11,20 @@
 # Copyright (c) 2025-2026, The TienKung-Lab Project Developers.
 # All rights reserved.
 # Modifications are licensed under the BSD-3-Clause license.
-#
-# This file contains code derived from the RSL-RL, Isaac Lab, and Legged Lab Projects,
-# with additional modifications by the TienKung-Lab Project,
-# and is distributed under the BSD-3-Clause license.
 
-"""Definitions for neural-network components for RL-agents."""
+"""
+RSL-RL Modules
+
+该模块包含强化学习的策略和价值函数网络模块。
+This module contains policy and value function network modules for reinforcement learning.
+"""
 
 from .actor_critic import ActorCritic
 from .actor_critic_recurrent import ActorCriticRecurrent
+from .actor_critic_saw import ActorCriticSaW, ActorCriticRecurrentSaW
 from .discriminator import Discriminator
 from .normalizer import EmpiricalNormalization
+from ..utils import Normalizer
 from .rnd import RandomNetworkDistillation
 from .student_teacher import StudentTeacher
 from .student_teacher_recurrent import StudentTeacherRecurrent
@@ -29,9 +32,12 @@ from .student_teacher_recurrent import StudentTeacherRecurrent
 __all__ = [
     "ActorCritic",
     "ActorCriticRecurrent",
+    "ActorCriticSaW",  # StandAndWalk控制器
+    "ActorCriticRecurrentSaW",
+    "Discriminator",
     "EmpiricalNormalization",
+    "Normalizer",
     "RandomNetworkDistillation",
     "StudentTeacher",
     "StudentTeacherRecurrent",
-    "Discriminator",
 ]
