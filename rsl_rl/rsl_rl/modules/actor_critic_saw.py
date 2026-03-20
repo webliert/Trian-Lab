@@ -158,6 +158,13 @@ class ActorCriticSaW(nn.Module):
         
         # Initialize LSTM weights
         self._init_lstm_weights()
+        
+        # =========================================================================
+        # Add memory attributes for exporter compatibility
+        # The exporter needs memory_a.rnn to get the LSTM for hidden state handling
+        # =========================================================================
+        self.memory_a = _MemoryModule(self.actor_lstm)
+        self.memory_c = _MemoryModule(self.critic_lstm)
     
     def _init_lstm_weights(self):
         """Initialize LSTM weights with orthogonal initialization."""
@@ -367,6 +374,39 @@ class ActorCriticSaW(nn.Module):
         """
         super().load_state_dict(state_dict, strict=strict)
         return True
+
+    # =========================================================================
+    # Properties for exporter compatibility (export_policy_as_jit / onnx)
+    # =========================================================================
+    
+    @property
+    def actor(self):
+        """Actor MLP module for exporter compatibility.
+        
+        Note: This returns only the MLP part (not LSTM) because the exporter's
+        forward_lstm handles the LSTM separately. The exporter expects:
+        1. self.rnn (from memory_a.rnn) = actor_lstm
+        2. self.actor = actor_mlp (to process LSTM output)
+        """
+        return self.actor_mlp
+    
+    @property
+    def critic(self):
+        """Critic MLP module for exporter compatibility.
+        
+        Note: This returns only the MLP part (not LSTM) for consistency.
+        """
+        return self.critic_mlp
+
+
+class _MemoryModule:
+    """Wrapper class to provide rnn attribute for exporter compatibility.
+    
+    The exporter expects policy.memory_a.rnn to access the LSTM module.
+    """
+    
+    def __init__(self, rnn):
+        self.rnn = rnn
 
 
 class ActorCriticRecurrentSaW(ActorCriticSaW):
