@@ -16,8 +16,6 @@
 # with additional modifications by the TienKung-Lab Project,
 # and is distributed under the BSD-3-Clause license.
 
-from legged_lab.envs.base.base_env import BaseEnv
-from legged_lab.envs.base.base_env_config import BaseAgentCfg, BaseEnvCfg
 from legged_lab.envs.tienkung.Experiment.run_cfg import TienKungRunAgentCfg, TienKungRunFlatEnvCfg
 from legged_lab.envs.tienkung.Experiment.run_with_sensor_cfg import (
     TienKungRunWithSensorAgentCfg,
@@ -46,18 +44,26 @@ from legged_lab.envs.tienkung.Experiment.unitree_style_walk_cfg import (
     TienKungUnitreeStyleEnvCfg,
     TienKungUnitreeStyleAgentCfg,
 )
-# Walk and Stand configuration
-from legged_lab.envs.tienkung.Experiment.walk_and_stand_cfg import (
-    TienKungWalkAndStandAgentCfg,
-    TienKungWalkAndStandFlatEnvCfg,
+# Walk and Stand LSTM configuration
+from legged_lab.envs.tienkung.Experiment.walk_and_stand_cfg_lstm import (
+    TienKungSawLstmAgentCfg,
+    TienKungSawLstmFlatEnvCfg,
 )
+
+# Walk and Stand MLP configuration
+from legged_lab.envs.tienkung.Experiment.walk_and_stand_cfg_mlp import (
+    TienKungSawMlpAgentCfg,
+    TienKungSawMlpFlatEnvCfg,
+)
+
 # Stand configuration (for fast standing learning with curriculum)
 from legged_lab.envs.tienkung.Experiment.stand_cfg import (
     TienKungStandAgentCfg,
     TienKungStandFlatEnvCfg,
 )
 from legged_lab.envs.tienkung.Robot.tienkung_env_stand import TienKungStandEnv
-from legged_lab.envs.tienkung.Robot.tienkung_env_walk_stand import TienKungWalkAndStandEnv
+from legged_lab.envs.tienkung.Robot.tienkung_env_walk_stand_lstm import TienKungWalkAndStandEnvLSTM
+from legged_lab.envs.tienkung.Robot.tienkung_env_walk_stand_mlp import TienKungWalkAndStandEnvMLP
 
 from legged_lab.utils.task_registry import task_registry
 
@@ -76,10 +82,16 @@ task_registry.register(
 task_registry.register(
     "unitree_style_walk", TienKungEnv, TienKungUnitreeStyleEnvCfg(), TienKungUnitreeStyleAgentCfg()
 )
-# Register Walk and Stand task
+# Register Walk and Stand LSTM task
 task_registry.register(
-    "walk_and_stand", TienKungWalkAndStandEnv, TienKungWalkAndStandFlatEnvCfg(), TienKungWalkAndStandAgentCfg()
+    "walk_and_stand_lstm", TienKungWalkAndStandEnvLSTM, TienKungSawLstmFlatEnvCfg(), TienKungSawLstmAgentCfg()
 )
+
+# Register Walk and Stand MLP task
+task_registry.register(
+    "walk_and_stand_mlp", TienKungWalkAndStandEnvMLP, TienKungSawMlpFlatEnvCfg(), TienKungSawMlpAgentCfg()
+)
+
 # Register Stand task (fast standing learning, uses TienKungStandEnv without gait)
 task_registry.register(
     "stand", TienKungStandEnv, TienKungStandFlatEnvCfg(), TienKungStandAgentCfg()

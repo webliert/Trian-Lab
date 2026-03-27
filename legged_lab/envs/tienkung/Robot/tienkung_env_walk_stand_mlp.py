@@ -25,8 +25,8 @@ from isaaclab.utils.math import quat_apply, quat_conjugate, quat_rotate_inverse,
 from scipy.spatial.transform import Rotation
 
 # 天工实验室配置模块 / TienKung Lab configuration modules
-from legged_lab.envs.tienkung.Experiment.walk_and_stand_cfg import (
-    TienKungWalkAndStandFlatEnvCfg,
+from legged_lab.envs.tienkung.Experiment.walk_and_stand_cfg_mlp import (
+    TienKungSawMlpFlatEnvCfg,
     SaWCommandConfig,
     SaWRandomPushConfig
 )
@@ -37,13 +37,13 @@ from rsl_rl.env import VecEnv
 from rsl_rl.utils import AMPLoaderDisplay
 
 
-class TienKungWalkAndStandEnv(VecEnv):
+class TienKungWalkAndStandEnvMLP(VecEnv):
     def __init__(
         self,
-        cfg: TienKungWalkAndStandFlatEnvCfg,
+        cfg: TienKungSawMlpFlatEnvCfg,
         headless: bool,
     ):
-        self.cfg : TienKungWalkAndStandFlatEnvCfg = cfg # 保存配置引用 / Save configuration reference
+        self.cfg : TienKungSawMlpFlatEnvCfg = cfg # 保存配置引用 / Save configuration reference
         self.headless = headless  # 是否无头模式 / Whether in headless mode
         self.device = self.cfg.device  # CUDA设备 / CUDA device
         # 时间参数设置 / Time parameter settings

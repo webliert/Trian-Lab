@@ -127,7 +127,7 @@ class WalkAndStandRewardCfg:
 
 
 @configclass
-class TienKungWalkAndStandFlatEnvCfg:
+class TienKungSawLstmFlatEnvCfg:
     """天工机器人行走+站立平坦环境配置类 / TienKung Robot Walk and Stand Flat Environment Configuration Class
     
     定义天工机器人在平坦地形上行走和站立的环境配置参数。
@@ -299,7 +299,7 @@ class TienKungWalkAndStandFlatEnvCfg:
 
 
 @configclass
-class TienKungWalkAndStandAgentCfg(RslRlOnPolicyRunnerCfg):
+class TienKungSawLstmAgentCfg(RslRlOnPolicyRunnerCfg):
     """天工机器人行走+站立智能体配置类 / TienKung Robot Walk and Stand Agent Configuration Class
     
     定义行走+站立任务的强化学习智能体配置参数，继承自RSL-RL策略运行器配置。

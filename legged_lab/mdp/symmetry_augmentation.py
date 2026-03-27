@@ -35,13 +35,13 @@ from typing import TYPE_CHECKING, Tuple
 import torch
 
 if TYPE_CHECKING:
-    from legged_lab.envs.tienkung.Robot.tienkung_env_walk_stand import TienKungWalkAndStandEnv
+    from legged_lab.envs.tienkung.Robot.tienkung_env_walk_stand_lstm import TienKungWalkAndStandEnvLSTM
 
 
 def symmetry_augment_standing(
     obs: torch.Tensor,
     actions: torch.Tensor | None,
-    env: TienKungWalkAndStandEnv,
+    env: TienKungWalkAndStandEnvLSTM,
     obs_type: str = "policy"
 ) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
@@ -186,7 +186,7 @@ def symmetry_augment_standing(
 def simple_symmetry_augment(
     obs: torch.Tensor,
     actions: torch.Tensor | None,
-    env: "TienKungWalkAndStandEnv" | None = None,
+    env: "TienKungWalkAndStandEnvLSTM" | None = None,
     obs_type: str = "policy"
 ) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
@@ -234,7 +234,7 @@ def simple_symmetry_augment(
 def symmetry_augment_walking(
     obs: torch.Tensor,
     actions: torch.Tensor | None,
-    env: "TienKungWalkAndStandEnv" | None = None,
+    env: "TienKungWalkAndStandEnvLSTM" | None = None,
     obs_type: str = "policy"
 ) -> Tuple[torch.Tensor, torch.Tensor | None]:
     """
