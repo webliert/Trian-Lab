@@ -19,8 +19,8 @@
 
 ## Overview
 
-| Motion |              AMP Animation               |                     Sensors                      |                   RL + AMP                    |                   Sim2Sim                   |
-| :----: | :--------------------------------------: | :----------------------------------------------: | :-------------------------------------------: | :-----------------------------------------: |
+| Motion |               AMP Animation               |                      Sensors                      |                    RL + AMP                    |                   Sim2Sim                    |
+| :----: | :---------------------------------------: | :-----------------------------------------------: | :--------------------------------------------: | :------------------------------------------: |
 |  Walk  | <img src="docs/walk_amp.gif" width="200"> | <img src="docs/walk_with_sensor.gif" width="200"> | <img src="docs/walk_isaaclab.gif" width="200"> | <img src="docs/walk_mujoco.gif" width="200"> |
 |  Run   | <img src="docs/run_amp.gif" width="200">  | <img src="docs/run_with_sensor.gif" width="200">  | <img src="docs/run_isaaclab.gif" width="200">  | <img src="docs/run_mujoco.gif" width="200">  |
 
@@ -65,9 +65,9 @@ python legged_lab/scripts/train.py --task=walk  --logger=tensorboard --headless 
 
 ### Motion Retargeting
 
-| AMASS  |  GMR               |                     TIENKUNGLAB                      | 
-| :----: | :--------------------------------------: | :----------------------------------------------: | 
-| <img src="docs/0007_Walking001.gif" height="150">   | <img src="docs/gmr.gif" height="150"> | <img src="docs/tienkunglab.gif" height="150"> | 
+|                       AMASS                       |                  GMR                  |                  TIENKUNGLAB                  |
+| :-----------------------------------------------: | :-----------------------------------: | :-------------------------------------------: |
+| <img src="docs/0007_Walking001.gif" height="150"> | <img src="docs/gmr.gif" height="150"> | <img src="docs/tienkunglab.gif" height="150"> |
 
 This section uses [GMR](https://github.com/YanjieZe/GMR) for motion retargeting, Tienkung currently supports motion retargeting only for SMPLX types (AMASS, OMOMO).
 

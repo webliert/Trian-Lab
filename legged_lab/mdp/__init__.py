@@ -23,4 +23,5 @@ from isaaclab.envs.mdp import *
 from .rewards import *
 from .events import *
 from .symmetryDex import *
+from .symmetryLite import *
 from .curriculums import *

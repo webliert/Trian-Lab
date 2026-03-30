@@ -66,7 +66,6 @@ class MujocoRunner:
     def __init__(self, cfg: SimToSimCfg, policy_path, model_path):
         self.cfg = cfg
         network_path = policy_path
-        # breakpoint()
         self.model = mujoco.MjModel.from_xml_path(model_path)
         self.model.opt.timestep = self.cfg.sim.dt
 
@@ -330,7 +329,7 @@ if __name__ == "__main__":
         sim_cfg.robot.gait_air_ratio_r = 0.6
         sim_cfg.robot.gait_phase_offset_l = 0.6
         sim_cfg.robot.gait_phase_offset_r = 0.1
-        sim_cfg.robot.gait_cycle = 0.64
+        sim_cfg.robot.gait_cycle = 0.5
 
     runner = MujocoRunner(
         cfg=sim_cfg,
