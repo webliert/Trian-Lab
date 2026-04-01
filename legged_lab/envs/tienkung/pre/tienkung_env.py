@@ -524,16 +524,18 @@ class TienKungEnv(VecEnv):
             actor_obs, _ = self.compute_current_observations()
             noise_vec = torch.zeros_like(actor_obs[0])
             noise_scales = self.cfg.noise.noise_scales
-            noise_vec[:3] = noise_scales.lin_vel * self.obs_scales.lin_vel
-            noise_vec[3:6] = noise_scales.ang_vel * self.obs_scales.ang_vel
-            noise_vec[6:9] = noise_scales.projected_gravity * self.obs_scales.projected_gravity
-            noise_vec[9:12] = 0
-            noise_vec[12 : 12 + self.num_actions] = noise_scales.joint_pos * self.obs_scales.joint_pos
-            noise_vec[12 + self.num_actions : 12 + self.num_actions * 2] = (
+            # noise_vec indices must match compute_current_observations order:
+            # ang_vel (0-2), projected_gravity (3-5), command (6-8), joint_pos (9-28),
+            # joint_vel (29-48), action (49-68), sin_gait (69-70), cos_gait (71-72), phase_ratio (73-74)
+            noise_vec[:3] = noise_scales.ang_vel * self.obs_scales.ang_vel
+            noise_vec[3:6] = noise_scales.projected_gravity * self.obs_scales.projected_gravity
+            noise_vec[6:9] = 0  # command - no noise
+            noise_vec[9 : 9 + self.num_actions] = noise_scales.joint_pos * self.obs_scales.joint_pos
+            noise_vec[9 + self.num_actions : 9 + self.num_actions * 2] = (
                 noise_scales.joint_vel * self.obs_scales.joint_vel
             )
-            noise_vec[12 + self.num_actions * 2 : 12 + self.num_actions * 3] = 0.0
-            noise_vec[12 + self.num_actions * 3 : 18 + self.num_actions * 3] = 0.0
+            noise_vec[9 + self.num_actions * 2 : 9 + self.num_actions * 3] = 0.0  # action - no noise
+            noise_vec[9 + self.num_actions * 3 : 15 + self.num_actions * 3] = 0.0  # gait phase - no noise
             self.noise_scale_vec = noise_vec
 
             if self.cfg.scene.height_scanner.enable_height_scan:
