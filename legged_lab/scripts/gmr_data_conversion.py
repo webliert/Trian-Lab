@@ -90,7 +90,6 @@ def convert_pkl_to_custom(input_pkl, output_txt, fps):
         f.write('"LoopMode": "Wrap",\n')
         f.write(f'"FrameDuration": {1.0/fps:.3f},\n')
         f.write('"EnableCycleOffsetPosition": true,\n')
-        f.write('"EnableCycleOffsetPosition": true,\n')
         f.write('"EnableCycleOffsetRotation": true,\n')
         f.write('"MotionWeight": 0.5,\n\n')
         f.write('"Frames":\n[\n')
