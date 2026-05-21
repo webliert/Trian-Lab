@@ -324,7 +324,6 @@ class TienKungSwingFlatEnvCfg:
     noise: NoiseCfg = NoiseCfg(
         add_noise=True,
         noise_scales=NoiseScalesCfg(
-            lin_vel=0.2,
             ang_vel=0.2,
             projected_gravity=0.05,
             joint_pos=0.01,

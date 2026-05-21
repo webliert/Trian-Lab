@@ -323,8 +323,7 @@ class TienKungWalkFlatEnvCfg:
     )
     noise: NoiseCfg = NoiseCfg(
         add_noise=True,
-        noise_scales=NoiseScalesCfg(
-            lin_vel=0.2,
+        noise_scales=NoiseScalesCfg(            
             ang_vel=0.2,
             projected_gravity=0.05,
             joint_pos=0.01,
