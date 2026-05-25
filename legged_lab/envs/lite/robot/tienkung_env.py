@@ -33,10 +33,10 @@ from isaaclab.utils.math import quat_apply, quat_conjugate
 from scipy.spatial.transform import Rotation
 
 from legged_lab.envs.base.command_curriculum import GridAdaptiveCurriculum
-from legged_lab.envs.tienkung.run_cfg import TienKungRunFlatEnvCfg
-from legged_lab.envs.tienkung.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
-from legged_lab.envs.tienkung.walk_cfg import TienKungWalkFlatEnvCfg
-from legged_lab.envs.tienkung.walk_with_sensor_cfg import (
+from legged_lab.envs.lite.run_cfg import TienKungRunFlatEnvCfg
+from legged_lab.envs.lite.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
+from legged_lab.envs.lite.walk_cfg import TienKungWalkFlatEnvCfg
+from legged_lab.envs.lite.walk_with_sensor_cfg import (
     TienKungWalkWithSensorFlatEnvCfg,
 )
 from legged_lab.utils.env_utils.scene import SceneCfg

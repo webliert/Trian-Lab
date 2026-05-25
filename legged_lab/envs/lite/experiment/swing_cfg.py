@@ -265,7 +265,7 @@ class LiteRewardCfg:
 
 @configclass
 class TienKungSwingFlatEnvCfg:
-    amp_motion_files_display = ["legged_lab/envs/tienkung/datasets/motion_visualization/motion_46_80.txt"]
+    amp_motion_files_display = ["legged_lab/envs/lite/datasets/motion_visualization/motion_46_80.txt"]
     device: str = "cuda:0"
     scene: BaseSceneCfg = BaseSceneCfg(
         max_episode_length_s=40.0,
@@ -473,20 +473,21 @@ class TienKungSwingAgentCfg(RslRlOnPolicyRunnerCfg):
         rnd_cfg=None,  # RslRlRndCfg()
     )
     clip_actions = None
-    save_interval = 100
+    save_interval = 1000
     runner_class_name = "AmpOnPolicyRunner"
     experiment_name = "lite_swing"
     run_name = ""
     logger = "tensorboard"
     neptune_project = "lite_swing"
     wandb_project = "lite_swing"
+    swanlab_project = "lite_swing"
     resume = False
     load_run = ".*"
     load_checkpoint = "model_.*.pt"
 
     # amp parameter
-    amp_reward_coef = 0.3
-    amp_motion_files = ["legged_lab/envs/tienkung/datasets/motion_amp_expert/motion_46_80.txt"]
+    amp_reward_coef = 0.5
+    amp_motion_files = ["legged_lab/envs/lite/datasets/motion_amp_expert/motion_46_80.txt"]
     amp_num_preload_transitions = 200000
     amp_task_reward_lerp = 0.5
     amp_discr_hidden_dims = [1024, 512, 256]

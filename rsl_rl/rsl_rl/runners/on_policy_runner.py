@@ -162,12 +162,17 @@ class OnPolicyRunner:
 
                 self.writer = WandbSummaryWriter(log_dir=self.log_dir, flush_secs=10, cfg=self.cfg)
                 self.writer.log_config(self.env.cfg, self.cfg, self.alg_cfg, self.policy_cfg)
+            elif self.logger_type == "swanlab":
+                from rsl_rl.utils.swanlab_utils import SwanlabSummaryWriter
+
+                self.writer = SwanlabSummaryWriter(log_dir=self.log_dir, flush_secs=10, cfg=self.cfg)
+                self.writer.log_config(self.env.cfg, self.cfg, self.alg_cfg, self.policy_cfg)
             elif self.logger_type == "tensorboard":
                 from torch.utils.tensorboard import SummaryWriter
 
                 self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
             else:
-                raise ValueError("Logger type not found. Please choose 'neptune', 'wandb' or 'tensorboard'.")
+                raise ValueError("Logger type not found. Please choose 'neptune', 'wandb', 'swanlab' or 'tensorboard'.")
 
         # check if teacher is loaded
         if self.training_type == "distillation" and not self.alg.policy.loaded_teacher:
@@ -429,7 +434,7 @@ class OnPolicyRunner:
         torch.save(saved_dict, path)
 
         # upload model to external logging service
-        if self.logger_type in ["neptune", "wandb"] and not self.disable_logs:
+        if self.logger_type in ["neptune", "wandb", "swanlab"] and not self.disable_logs:
             self.writer.save_model(path, self.current_learning_iteration)
 
     def load(self, path: str, load_optimizer: bool = True):

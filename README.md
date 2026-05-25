@@ -124,8 +124,8 @@ python legged_lab/scripts/play_amp_animation.py --task=run_with_sensor --num_env
 Train the policy using AMP expert data from tienkung/datasets/motion_amp_expert.
 
 ```bash
-python legged_lab/scripts/train.py --task=walk --headless --logger=tensorboard --num_envs=4096
-python legged_lab/scripts/train.py --task=run --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_walk --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_run --headless --logger=tensorboard --num_envs=4096
 ```
 
 ### Play
@@ -133,8 +133,8 @@ python legged_lab/scripts/train.py --task=run --headless --logger=tensorboard --
 Run the trained policy.
 
 ```bash
-python legged_lab/scripts/play.py --task=walk --num_envs=1
-python legged_lab/scripts/play.py --task=run --num_envs=1
+python legged_lab/scripts/play.py --task=lite_walk --num_envs=1
+python legged_lab/scripts/play.py --task=lite_run --num_envs=1
 ```
 
 ### Sim2Sim(MuJoCo)

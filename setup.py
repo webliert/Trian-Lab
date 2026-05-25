@@ -24,5 +24,5 @@ setup(
     name="LeggedLab",
     packages=find_packages(),
     version="0.1.0",
-    install_requires=["IsaacLab", "pynput", "mujoco==3.3.2", "mujoco-python-viewer", "matplotlib"],
+    install_requires=["IsaacLab", "pynput", "mujoco==3.3.2", "mujoco-python-viewer", "matplotlib", "swanlab"],
 )

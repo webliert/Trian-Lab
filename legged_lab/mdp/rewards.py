@@ -29,7 +29,7 @@ from isaaclab.sensors import ContactSensor
 
 if TYPE_CHECKING:
     from legged_lab.envs.base.base_env import BaseEnv
-    from legged_lab.envs.tienkung.tienkung_env import DexEnv
+    from legged_lab.envs.dex.dex_env import DexEnv
 
 def gaussian(x, value_at_1):
     scale = np.sqrt(-2 * np.log(value_at_1))

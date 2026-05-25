@@ -41,10 +41,13 @@ def add_rsl_rl_args(parser: argparse.ArgumentParser):
     arg_group.add_argument("--checkpoint", type=str, default=None, help="Checkpoint file to resume from.")
     # -- logger arguments
     arg_group.add_argument(
-        "--logger", type=str, default=None, choices={"wandb", "tensorboard", "neptune"}, help="Logger module to use."
+        "--logger", type=str, default=None, choices={"wandb", "tensorboard", "neptune", "swanlab"}, help="Logger module to use."
     )
     arg_group.add_argument(
-        "--log_project_name", type=str, default=None, help="Name of the logging project when using wandb or neptune."
+        "--log_project_name", type=str, default=None, help="Name of the logging project when using wandb, neptune or swanlab."
+    )
+    arg_group.add_argument(
+        "--swanlab_project", type=str, default=None, help="Name of the SwanLab project."
     )
     arg_group.add_argument(
         "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
@@ -72,9 +75,14 @@ def update_rsl_rl_cfg(agent_cfg: BaseAgentConfig, args_cli: argparse.Namespace):
         agent_cfg.run_name = args_cli.run_name
     if args_cli.logger is not None:
         agent_cfg.logger = args_cli.logger
-    # set the project name for wandb and neptune
+    # set the project name for wandb, neptune and swanlab
     if agent_cfg.logger in {"wandb", "neptune"} and args_cli.log_project_name:
         agent_cfg.wandb_project = args_cli.log_project_name
         agent_cfg.neptune_project = args_cli.log_project_name
+    if agent_cfg.logger == "swanlab":
+        if args_cli.swanlab_project:
+            agent_cfg.swanlab_project = args_cli.swanlab_project
+        elif args_cli.log_project_name:
+            agent_cfg.swanlab_project = args_cli.log_project_name
 
     return agent_cfg
