@@ -90,20 +90,20 @@ The dataset consists of two parts with distinct functions and formats, requiring
 - **Step 1: Data Processing and Visualization Data Saving.**
 
 ```bash
-python legged_lab/scripts/gmr_data_conversion.py --input_pkl <path_to_save_robot_data.pkl> --output_txt legged_lab/envs/tienkung/datasets/motion_visualization/motion.txt
+python legged_lab/scripts/gmr_data_conversion.py --input_pkl <path_to_save_robot_data.pkl> --output_txt legged_lab/envs/lite/datasets/motion_visualization/motion.txt
 ```
 
 **Note**: Before starting step 2, set the `amp_motion_files_display` path in the config to the file generated in step 1.
 
 - **Step 2: Motion Visualization and Expert Data Saving.**
 ```bash
-python legged_lab/scripts/play_amp_animation.py --task=walk --num_envs=1 --save_path legged_lab/envs/tienkung/datasets/motion_amp_expert/motion.txt --fps 30.0
+python legged_lab/scripts/play_amp_animation.py --task=walk --num_envs=1 --save_path legged_lab/envs/lite/datasets/motion_amp_expert/motion.txt --fps 30.0
 ```
 **Note**: After step 2, set the `amp_motion_files` path in the config to the file generated in step 2.
 
 ### Visualize motion
 
-Visualize the motion by updating the simulation with data from tienkung/datasets/motion_visualization.
+Visualize the motion by updating the simulation with data from lite/datasets/motion_visualization.
 
 ```bash
 python legged_lab/scripts/play_amp_animation.py --task=walk --num_envs=1
@@ -112,7 +112,7 @@ python legged_lab/scripts/play_amp_animation.py --task=run --num_envs=1
 
 ### Visualize motion with sensors
 
-Visualize the motion with sensors by updating the simulation with data from tienkung/datasets/motion_visualization.
+Visualize the motion with sensors by updating the simulation with data from lite/datasets/motion_visualization.
 
 ```bash
 python legged_lab/scripts/play_amp_animation.py --task=walk_with_sensor --num_envs=1
@@ -121,7 +121,7 @@ python legged_lab/scripts/play_amp_animation.py --task=run_with_sensor --num_env
 
 ### Train
 
-Train the policy using AMP expert data from tienkung/datasets/motion_amp_expert.
+Train the policy using AMP expert data from lite/datasets/motion_amp_expert.
 
 ```bash
 python legged_lab/scripts/train.py --task=lite_walk --headless --logger=tensorboard --num_envs=4096

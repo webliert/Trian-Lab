@@ -170,7 +170,7 @@ class LiteRewardCfg:
 
 @configclass
 class TienKungRunFlatEnvCfg:
-    amp_motion_files_display = ["legged_lab/envs/tienkung/datasets/motion_visualization/run.txt"]
+    amp_motion_files_display = ["legged_lab/envs/lite/datasets/motion_visualization/run.txt"]
     device: str = "cuda:0"
     scene: BaseSceneCfg = BaseSceneCfg(
         max_episode_length_s=20.0,
@@ -391,7 +391,7 @@ class TienKungRunAgentCfg(RslRlOnPolicyRunnerCfg):
 
     # amp parameter
     amp_reward_coef = 0.3
-    amp_motion_files = ["legged_lab/envs/tienkung/datasets/motion_amp_expert/run.txt"]
+    amp_motion_files = ["legged_lab/envs/lite/datasets/motion_amp_expert/run.txt"]
     amp_num_preload_transitions = 200000
     amp_task_reward_lerp = 0.7
     amp_discr_hidden_dims = [1024, 512, 256]

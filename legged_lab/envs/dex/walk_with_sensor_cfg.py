@@ -163,7 +163,7 @@ class LiteRewardCfg:
 
 @configclass
 class TienKungWalkWithSensorFlatEnvCfg:
-    amp_motion_files_display = ["legged_lab/envs/tienkung/datasets/motion_visualization/walk.txt"]
+    amp_motion_files_display = ["legged_lab/envs/dex/datasets/motion_visualization/walk.txt"]
     device: str = "cuda:0"
     scene: BaseSceneCfg = BaseSceneCfg(
         max_episode_length_s=20.0,
@@ -342,7 +342,7 @@ class TienKungWalkWithSensorAgentCfg(RslRlOnPolicyRunnerCfg):
 
     # amp parameter
     amp_reward_coef = 0.3
-    amp_motion_files = ["legged_lab/envs/tienkung/datasets/motion_amp_expert/walk.txt"]
+    amp_motion_files = ["legged_lab/envs/dex/datasets/motion_amp_expert/walk.txt"]
     amp_num_preload_transitions = 200000
     amp_task_reward_lerp = 0.7
     amp_discr_hidden_dims = [1024, 512, 256]

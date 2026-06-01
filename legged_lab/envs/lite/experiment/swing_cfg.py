@@ -176,66 +176,66 @@ class LiteRewardCfg:
     hip_roll_vel = RewTerm(func=mdp.hip_roll_vel, weight=-1.0)
     alive_reward = RewTerm(func=mdp.alive_reward, weight=0.5)
 
-    stand_still = RewTerm(
-        func=mdp.stand_still,
-        weight=-0.5,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    # "shoulder_roll_.*_joint",
-                    "shoulder_yaw_.*_joint",
-                    "shoulder_pitch_.*_joint",
-                    "elbow_pitch_.*_joint",
-                    # "waist_yaw_joint",
-                    # "waist_roll_joint",
-                    # "waist_pitch_joint",
-                    "hip_pitch_.*_joint",
-                    "hip_roll_.*_joint",
-                    "hip_yaw_.*_joint",
-                    "knee_pitch_.*_joint",
-                    "ankle_pitch_.*_joint",
-                    "ankle_roll_.*_joint",
-                ],
-            ),
-            "zero_threshold": 0.2,  # 0.1 -> 0.2: wider deadband for smoother transition
-        },
-    )
+    # stand_still = RewTerm(
+    #     func=mdp.stand_still,
+    #     weight=-0.5,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg(
+    #             "robot",
+    #             joint_names=[
+    #                 # "shoulder_roll_.*_joint",
+    #                 "shoulder_yaw_.*_joint",
+    #                 "shoulder_pitch_.*_joint",
+    #                 "elbow_pitch_.*_joint",
+    #                 # "waist_yaw_joint",
+    #                 # "waist_roll_joint",
+    #                 # "waist_pitch_joint",
+    #                 "hip_pitch_.*_joint",
+    #                 "hip_roll_.*_joint",
+    #                 "hip_yaw_.*_joint",
+    #                 "knee_pitch_.*_joint",
+    #                 "ankle_pitch_.*_joint",
+    #                 "ankle_roll_.*_joint",
+    #             ],
+    #         ),
+    #         "zero_threshold": 0.2,  # 0.1 -> 0.2: wider deadband for smoother transition
+    #     },
+    # )
 
-    stand_still_exp = RewTerm(
-        func=mdp.stand_still_exp,
-        weight=7.0,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    # "shoulder_roll_.*_joint",
-                    "shoulder_yaw_.*_joint",
-                    "shoulder_pitch_.*_joint",
-                    "elbow_pitch_.*_joint",
-                    # "waist_yaw_joint",
-                    # "waist_roll_joint",
-                    # "waist_pitch_joint",
-                    "hip_pitch_.*_joint",
-                    "hip_roll_.*_joint",
-                    "hip_yaw_.*_joint",
-                    "knee_pitch_.*_joint",
-                    "ankle_pitch_.*_joint",
-                    "ankle_roll_.*_joint",
-                ],
-            ),
-            "zero_threshold": 0.2,  # 0.1 -> 0.2: wider deadband for smoother transition
-        },
-    )
+    # stand_still_exp = RewTerm(
+    #     func=mdp.stand_still_exp,
+    #     weight=7.0,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg(
+    #             "robot",
+    #             joint_names=[
+    #                 # "shoulder_roll_.*_joint",
+    #                 "shoulder_yaw_.*_joint",
+    #                 "shoulder_pitch_.*_joint",
+    #                 "elbow_pitch_.*_joint",
+    #                 # "waist_yaw_joint",
+    #                 # "waist_roll_joint",
+    #                 # "waist_pitch_joint",
+    #                 "hip_pitch_.*_joint",
+    #                 "hip_roll_.*_joint",
+    #                 "hip_yaw_.*_joint",
+    #                 "knee_pitch_.*_joint",
+    #                 "ankle_pitch_.*_joint",
+    #                 "ankle_roll_.*_joint",
+    #             ],
+    #         ),
+    #         "zero_threshold": 0.2,  # 0.1 -> 0.2: wider deadband for smoother transition
+    #     },
+    # )
     
-    stand_still_vel = RewTerm(
-        func=mdp.stand_still_vel,
-        weight=-0.05,
-    )
-    stand_still_feet_motion_penalty = RewTerm(
-        func=mdp.stand_still_feet_motion_penalty,
-        weight=-0.5,
-    )
+    # stand_still_vel = RewTerm(
+    #     func=mdp.stand_still_vel,
+    #     weight=-0.05,
+    # )
+    # stand_still_feet_motion_penalty = RewTerm(
+    #     func=mdp.stand_still_feet_motion_penalty,
+    #     weight=-0.5,
+    # )
     
     # stand_still_base_ang_acc = RewTerm(
     #     func=mdp.stand_still_base_ang_acc,
@@ -245,15 +245,15 @@ class LiteRewardCfg:
     #         "zero_threshold": 0.2,
     #     },
     # )
-    stand_still_double_support = RewTerm(
-        func=mdp.stand_still_double_support,
-        weight=0.5,  # Positive weight to reward double support
-        params={
-            "sensor_cfg": SceneEntityCfg("contact_sensor", body_names="ankle_roll.*"),
-            "zero_threshold": 0.2,
-            "contact_threshold": 2.0,
-        },
-    )
+    # stand_still_double_support = RewTerm(
+    #     func=mdp.stand_still_double_support,
+    #     weight=0.5,  # Positive weight to reward double support
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_sensor", body_names="ankle_roll.*"),
+    #         "zero_threshold": 0.2,
+    #         "contact_threshold": 2.0,
+    #     },
+    # )
     # stand_still_body_lin_vel = RewTerm(
     #     func=mdp.stand_still_body_lin_vel,
     #     weight=-1.0,  # Penalize linear velocity during standing
