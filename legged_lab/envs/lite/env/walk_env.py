@@ -29,14 +29,13 @@ from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.sensors.camera import TiledCamera
 from isaaclab.sim import PhysxCfg, SimulationContext
 from isaaclab.utils.buffers import CircularBuffer, DelayBuffer
-from isaaclab.utils.math import quat_apply, quat_conjugate
+from isaaclab.utils.math import quat_apply, quat_conjugate, quat_rotate
 from scipy.spatial.transform import Rotation
 
-from legged_lab.envs.base.command_curriculum import GridAdaptiveCurriculum
-from legged_lab.envs.lite.run_cfg import TienKungRunFlatEnvCfg
-from legged_lab.envs.lite.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
-from legged_lab.envs.lite.walk_cfg import TienKungWalkFlatEnvCfg
-from legged_lab.envs.lite.walk_with_sensor_cfg import (
+from legged_lab.envs.lite.config.run_cfg import TienKungRunFlatEnvCfg
+from legged_lab.envs.lite.config.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
+from legged_lab.envs.lite.config.walk_cfg import TienKungWalkFlatEnvCfg
+from legged_lab.envs.lite.config.walk_with_sensor_cfg import (
     TienKungWalkWithSensorFlatEnvCfg,
 )
 from legged_lab.utils.env_utils.scene import SceneCfg
@@ -44,7 +43,7 @@ from rsl_rl.env import VecEnv
 from rsl_rl.utils import AMPLoaderDisplay
 
 
-class TienKungEnv(VecEnv):
+class TienKungWalkEnv(VecEnv):
     def __init__(
         self,
         cfg: (
@@ -111,12 +110,6 @@ class TienKungEnv(VecEnv):
             ranges=self.cfg.commands.ranges,
         )
         self.command_generator = UniformVelocityCommand(cfg=command_cfg, env=self)
-        self._use_cmd_curriculum = getattr(self.cfg, "command_curriculum_cfg", None) is not None
-        if self._use_cmd_curriculum:
-            self.command_curriculum = GridAdaptiveCurriculum(self.cfg.command_curriculum_cfg)
-            self.command_resample_time = torch.zeros(self.num_envs, device=self.device)
-            self.curriculum_bin_inds = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
-            self.command_success_threshold = getattr(self.cfg, "command_curriculum_success_threshold", 0.0)
         self.reward_manager = RewardManager(self.cfg.reward, self)
 
         self.init_buffers()
@@ -224,7 +217,6 @@ class TienKungEnv(VecEnv):
         self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self.sim_step_counter = 0
         self.time_out_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
-        self.episode_return = torch.zeros(self.num_envs, device=self.device)
 
         self.left_arm_local_vec = torch.tensor([0.0, 0.0, -0.3], device=self.device).repeat((self.num_envs, 1))
         self.right_arm_local_vec = torch.tensor([0.0, 0.0, -0.3], device=self.device).repeat((self.num_envs, 1))
@@ -242,7 +234,6 @@ class TienKungEnv(VecEnv):
             dtype=torch.float,
             device=self.device,
         ).repeat(self.num_envs, 1)
-        # !Init gait parameter
         self.action = torch.zeros(
             self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False
         )
@@ -253,32 +244,6 @@ class TienKungEnv(VecEnv):
             self.num_envs, len(self.feet_cfg.body_ids), dtype=torch.float, device=self.device, requires_grad=False
         )
         self.init_obs_buffer()
-
-        if self._use_cmd_curriculum:
-            self._reset_command_resample_time(torch.arange(self.num_envs, device=self.device))
-            self._sample_curriculum_commands(torch.arange(self.num_envs, device=self.device))
-
-    def _reset_command_resample_time(self, env_ids: torch.Tensor):
-        if len(env_ids) == 0:
-            return
-        low, high = self.cfg.commands.resampling_time_range
-        self.command_resample_time[env_ids] = torch.rand(len(env_ids), device=self.device) * (high - low) + low
-
-    def _sample_curriculum_commands(self, env_ids: torch.Tensor):
-        if len(env_ids) == 0:
-            return
-        cmds_np, bin_inds = self.command_curriculum.sample(len(env_ids))
-        cmds = torch.tensor(cmds_np, device=self.device, dtype=torch.float)
-        # keys assumed ["x", "y", "yaw"]
-        self.command_generator.command[env_ids, 0] = cmds[:, 0]
-        self.command_generator.command[env_ids, 1] = cmds[:, 1]
-        self.command_generator.command[env_ids, 2] = cmds[:, 2]
-        self.curriculum_bin_inds[env_ids] = torch.as_tensor(bin_inds, device=self.device, dtype=torch.long)
-        self._reset_command_resample_time(env_ids)
-        self.extras.setdefault("log", {})
-        self.extras["log"]["Curriculum/cmd_x"] = self.command_generator.command[:, 0].mean()
-        self.extras["log"]["Curriculum/cmd_y"] = self.command_generator.command[:, 1].mean()
-        self.extras["log"]["Curriculum/cmd_yaw"] = self.command_generator.command[:, 2].mean()
 
     def visualize_motion(self, time):
         """
@@ -324,7 +289,7 @@ class TienKungEnv(VecEnv):
             [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]], dtype=torch.float32, device=device
         )
 
-        lin_vel = visual_motion_frame[26:29].clone()
+        lin_vel = visual_motion_frame[27:30].clone()
         ang_vel = torch.zeros_like(lin_vel)
 
         # root state: [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
@@ -342,12 +307,12 @@ class TienKungEnv(VecEnv):
         left_hand_pos = (
             self.robot.data.body_state_w[:, self.elbow_body_ids[0], :3]
             - self.robot.data.root_state_w[:, 0:3]
-            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
+            + quat_rotate(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
         )
         right_hand_pos = (
             self.robot.data.body_state_w[:, self.elbow_body_ids[1], :3]
             - self.robot.data.root_state_w[:, 0:3]
-            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
+            + quat_rotate(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
         )
         left_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), left_hand_pos)
         right_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), right_hand_pos)
@@ -468,11 +433,6 @@ class TienKungEnv(VecEnv):
                 self.extras["log"].update(terrain_levels)
 
         self.scene.reset(env_ids)
-        # Randomize gait cycle per environment within configured bounds
-        if hasattr(self.cfg.gait, "gait_cycle_lower") and hasattr(self.cfg.gait, "gait_cycle_upper"):
-            lower = self.cfg.gait.gait_cycle_lower
-            upper = self.cfg.gait.gait_cycle_upper
-            self.gait_cycle[env_ids] = torch.rand(len(env_ids), device=self.device) * (upper - lower) + lower
         if "reset" in self.event_manager.available_modes:
             self.event_manager.apply(
                 mode="reset",
@@ -484,19 +444,8 @@ class TienKungEnv(VecEnv):
         reward_extras = self.reward_manager.reset(env_ids)
         self.extras["log"].update(reward_extras)
         self.extras["time_outs"] = self.time_out_buf
-        if self._use_cmd_curriculum:
-            rewards_for_update = self.episode_return[env_ids].detach().clone()
-            if len(env_ids) > 0:
-                self.command_curriculum.update_success_rate(
-                    self.curriculum_bin_inds[env_ids].cpu().numpy(),
-                    [rewards_for_update],
-                    [self.command_success_threshold],
-                )
-                self.command_curriculum.update_weights()
-            self.episode_return[env_ids] = 0.0
-            self._sample_curriculum_commands(env_ids)
-        else:
-            self.command_generator.reset(env_ids)
+
+        self.command_generator.reset(env_ids)
         self.actor_obs_buffer.reset(env_ids)
         self.critic_obs_buffer.reset(env_ids)
         self.action_buffer.reset(env_ids)
@@ -537,20 +486,13 @@ class TienKungEnv(VecEnv):
 
         self.episode_length_buf += 1
         self._calculate_gait_para()
-        if self._use_cmd_curriculum:
-            self.command_resample_time -= self.step_dt
-            resample_ids = torch.nonzero(self.command_resample_time <= 0.0, as_tuple=False).flatten()
-            if len(resample_ids) > 0:
-                self._sample_curriculum_commands(resample_ids)
-        else:
-            self.command_generator.compute(self.step_dt)
+
+        self.command_generator.compute(self.step_dt)
         if "interval" in self.event_manager.available_modes:
             self.event_manager.apply(mode="interval", dt=self.step_dt)
 
         self.reset_buf, self.time_out_buf = self.check_reset()
         reward_buf = self.reward_manager.compute(self.step_dt)
-        if self._use_cmd_curriculum:
-            self.episode_return += reward_buf.squeeze(-1)
         self.reset_env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset(self.reset_env_ids)
 
@@ -582,15 +524,18 @@ class TienKungEnv(VecEnv):
             actor_obs, _ = self.compute_current_observations()
             noise_vec = torch.zeros_like(actor_obs[0])
             noise_scales = self.cfg.noise.noise_scales
+            # noise_vec indices must match compute_current_observations order:
+            # ang_vel (0-2), projected_gravity (3-5), command (6-8), joint_pos (9-28),
+            # joint_vel (29-48), action (49-68), sin_gait (69-70), cos_gait (71-72), phase_ratio (73-74)
             noise_vec[:3] = noise_scales.ang_vel * self.obs_scales.ang_vel
             noise_vec[3:6] = noise_scales.projected_gravity * self.obs_scales.projected_gravity
-            noise_vec[6:9] = 0
+            noise_vec[6:9] = 0  # command - no noise
             noise_vec[9 : 9 + self.num_actions] = noise_scales.joint_pos * self.obs_scales.joint_pos
             noise_vec[9 + self.num_actions : 9 + self.num_actions * 2] = (
                 noise_scales.joint_vel * self.obs_scales.joint_vel
             )
-            noise_vec[9 + self.num_actions * 2 : 9 + self.num_actions * 3] = 0.0
-            noise_vec[9 + self.num_actions * 3 : 15 + self.num_actions * 3] = 0.0
+            noise_vec[9 + self.num_actions * 2 : 9 + self.num_actions * 3] = 0.0  # action - no noise
+            noise_vec[9 + self.num_actions * 3 : 15 + self.num_actions * 3] = 0.0  # gait phase - no noise
             self.noise_scale_vec = noise_vec
 
             if self.cfg.scene.height_scanner.enable_height_scan:
@@ -632,12 +577,12 @@ class TienKungEnv(VecEnv):
         left_hand_pos = (
             self.robot.data.body_state_w[:, self.elbow_body_ids[0], :3]
             - self.robot.data.root_state_w[:, 0:3]
-            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
+            + quat_rotate(self.robot.data.body_state_w[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
         )
         right_hand_pos = (
             self.robot.data.body_state_w[:, self.elbow_body_ids[1], :3]
             - self.robot.data.root_state_w[:, 0:3]
-            + quat_apply(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
+            + quat_rotate(self.robot.data.body_state_w[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec)
         )
         left_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), left_hand_pos)
         right_hand_pos = quat_apply(quat_conjugate(self.robot.data.root_state_w[:, 3:7]), right_hand_pos)

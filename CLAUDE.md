@@ -22,6 +22,22 @@ pip install -e .
 
 Repository must live **outside** the IsaacLab directory. If Pylance misses extension indexing, extend `python.analysis.extraPaths` in `.vscode/settings.json`.
 
+## Python Execution (conda env requirement)
+
+All Python execution in this project — `python`, `python3`, `pip`, `pip3` — MUST happen with the `tienkung_lab` conda env activated. The env lives under `/home/szxx/Downloads/New_miniconda3/envs/tienkung_lab` and ships the pinned IsaacSim 4.5.0 / IsaacLab 2.1.0 / RSL-RL 2.3.1 / Python 3.10 stack. Running against base conda (or any other env) silently picks up the wrong interpreter and missing/mismatched deps.
+
+Standard prefix for any python/pip command:
+
+```bash
+source /home/szxx/Downloads/New_miniconda3/etc/profile.d/conda.sh && \
+conda activate tienkung_lab && \
+<your-command>
+```
+
+This is enforced by a PreToolUse hook at [.claude/hooks/check-conda-tienkung-lab.sh](.claude/hooks/check-conda-tienkung-lab.sh), wired up via `.claude/settings.local.json`. The hook intercepts every Bash tool invocation: if it detects `python`/`python3`/`pip`/`pip3` at a command position (start-of-line or after `;`/`&&`/`||`/`|`/`&`) AND the same shell line does NOT contain the literal substring `conda activate tienkung_lab`, it denies the call with a fix-it message. Commands where `python` appears only inside arguments (`find -name "*python*"`, `grep python file`, `which python`) pass through unaffected.
+
+To enable the hook on a new clone/machine, copy `.claude/hooks/check-conda-tienkung-lab.sh` into your `.claude/settings.local.json` `hooks.PreToolUse` entry — `settings.local.json` itself is gitignored (it carries personal Read allow rules).
+
 ## Common Commands
 
 All entry points live in `legged_lab/scripts/`. They auto-launch the Omniverse app via `AppLauncher`. Tasks with `sensor` in the name set `--enable_cameras=True` automatically.

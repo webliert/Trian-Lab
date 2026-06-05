@@ -381,11 +381,11 @@ class DexRunAgentCfg(RslRlOnPolicyRunnerCfg):
     clip_actions = None
     save_interval = 100
     runner_class_name = "AmpOnPolicyRunner"
-    experiment_name = "run"
+    experiment_name = "dex_run"
     run_name = ""
     logger = "tensorboard"
-    neptune_project = "run"
-    wandb_project = "run"
+    neptune_project = "dex_run"
+    wandb_project = "dex_run"
     resume = False
     load_run = ".*"
     load_checkpoint = "model_.*.pt"

@@ -33,34 +33,19 @@ from isaaclab.utils.math import quat_apply, quat_conjugate
 from scipy.spatial.transform import Rotation
 
 from legged_lab.envs.base.command_curriculum import GridAdaptiveCurriculum
-from legged_lab.envs.lite.run_cfg import TienKungRunFlatEnvCfg
-from legged_lab.envs.lite.run_with_sensor_cfg import TienKungRunWithSensorFlatEnvCfg
-from legged_lab.envs.lite.walk_cfg import TienKungWalkFlatEnvCfg
-from legged_lab.envs.lite.walk_with_sensor_cfg import (
-    TienKungWalkWithSensorFlatEnvCfg,
-)
+from legged_lab.envs.lite.config.walk_stand_cfg import TienKungWalkStandFlatEnvCfg
 from legged_lab.utils.env_utils.scene import SceneCfg
 from rsl_rl.env import VecEnv
 from rsl_rl.utils import AMPLoaderDisplay
 
 
-class TienKungEnv(VecEnv):
+class TienKungWalkStandEnv(VecEnv):
     def __init__(
         self,
-        cfg: (
-            TienKungRunFlatEnvCfg
-            | TienKungWalkFlatEnvCfg
-            | TienKungWalkWithSensorFlatEnvCfg
-            | TienKungRunWithSensorFlatEnvCfg
-        ),
+        cfg: TienKungWalkStandFlatEnvCfg,
         headless,
     ):
-        self.cfg: (
-            TienKungRunFlatEnvCfg
-            | TienKungWalkFlatEnvCfg
-            | TienKungWalkWithSensorFlatEnvCfg
-            | TienKungRunWithSensorFlatEnvCfg
-        )
+        self.cfg: TienKungWalkStandFlatEnvCfg
 
         self.cfg = cfg
         self.headless = headless
@@ -111,9 +96,9 @@ class TienKungEnv(VecEnv):
             ranges=self.cfg.commands.ranges,
         )
         self.command_generator = UniformVelocityCommand(cfg=command_cfg, env=self)
-        self._use_cmd_curriculum = getattr(self.cfg, "command_curriculum_cfg", None) is not None
+        self._use_cmd_curriculum = getattr(self.cfg.commands, "command_curriculum_cfg", None) is not None
         if self._use_cmd_curriculum:
-            self.command_curriculum = GridAdaptiveCurriculum(self.cfg.command_curriculum_cfg)
+            self.command_curriculum = GridAdaptiveCurriculum(self.cfg.commands.command_curriculum_cfg)
             self.command_resample_time = torch.zeros(self.num_envs, device=self.device)
             self.curriculum_bin_inds = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
             self.command_success_threshold = getattr(self.cfg, "command_curriculum_success_threshold", 0.0)

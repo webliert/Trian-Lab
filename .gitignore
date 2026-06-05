@@ -7,3 +7,7 @@ run_bash.sh
 wandb
 MUJOCO_LOG.TXT
 .history
+
+# Claude Code: keep the project-shared hooks/skills, but local user settings
+# (personal Read allow rules, machine-specific paths) stay out of git.
+.claude/settings.local.json

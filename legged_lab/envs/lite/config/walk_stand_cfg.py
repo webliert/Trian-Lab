@@ -264,7 +264,7 @@ class LiteRewardCfg:
     # )
 
 @configclass
-class TienKungWalkFlatEnvCfg:
+class TienKungWalkStandFlatEnvCfg:
     amp_motion_files_display = ["legged_lab/envs/lite/datasets/motion_visualization/walk.txt"]
     device: str = "cuda:0"
     scene: BaseSceneCfg = BaseSceneCfg(
@@ -434,7 +434,7 @@ class TienKungWalkFlatEnvCfg:
 
 
 @configclass
-class TienKungWalkAgentCfg(RslRlOnPolicyRunnerCfg):
+class TienKungWalkStandAgentCfg(RslRlOnPolicyRunnerCfg):
     seed = 42
     device = "cuda:0"
     num_steps_per_env = 24
