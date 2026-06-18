@@ -19,7 +19,7 @@
 from typing import TYPE_CHECKING
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import ContactSensorCfg, patterns
 from isaaclab.terrains.terrain_importer_cfg import TerrainImporterCfg
@@ -115,4 +115,35 @@ class SceneCfg(InteractiveSceneCfg):
                 spawn=config.depth_camera.spawn,
                 debug_vis=config.depth_camera.debug_vis,
                 visualizer_cfg=config.depth_camera.visualizer_cfg,
+            )
+
+        # Carry-task cube: bound to hands at runtime via carry-frame sync.
+        # Only created when BaseSceneCfg.enable_object=True so existing walk/run
+        # tasks are unaffected.
+        if getattr(config, "enable_object", False):
+            self.object = RigidObjectCfg(
+                prim_path="{ENV_REGEX_NS}/Object",
+                spawn=sim_utils.CuboidCfg(
+                    # P0.7 (carry-task fix): cube is fully decoupled from physics.
+                    # disable_gravity=True keeps the cube at the carry frame
+                    # (teleported every step by TienKungCarryEnv._sync_carry_frame)
+                    # without falling under gravity, and collision_enabled=False
+                    # prevents the cube from triggering the robot's termination
+                    # contacts (pelvis / shoulder_roll.* / elbow_pitch.*) when
+                    # the carry frame clips the torso. The mass set by the
+                    # weight_curriculum is still used for the policy's
+                    # payload_mass observation; the cube's PhysX mass is
+                    # irrelevant because it neither falls nor collides.
+                    size=(0.40, 0.40, 0.40),
+                    rigid_props=sim_utils.RigidBodyPropertiesCfg(disable_gravity=True),
+                    mass_props=sim_utils.MassPropertiesCfg(mass=config.default_carry_mass),
+                    collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=False),
+                    physics_material=sim_utils.RigidBodyMaterialCfg(
+                        static_friction=1.5,
+                        dynamic_friction=1.2,
+                        restitution=0.0,
+                    ),
+                    visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.4, 0.2)),
+                ),
+                init_state=RigidObjectCfg.InitialStateCfg(pos=(0.30, 0.0, 1.10)),
             )

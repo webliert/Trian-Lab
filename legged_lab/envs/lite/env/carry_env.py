@@ -44,7 +44,6 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 import torch
-
 from isaaclab.assets import RigidObject
 from isaaclab.utils.math import quat_apply, quat_from_euler_xyz
 
@@ -57,7 +56,7 @@ if TYPE_CHECKING:
 class TienKungCarryEnv(TienKungWalkEnv):
     """TienKung 2 Lite env with a hand-bound cube and a mass-adaptive curriculum."""
 
-    def __init__(self, cfg: "TienKungCarryFlatEnvCfg", headless):
+    def __init__(self, cfg: TienKungCarryFlatEnvCfg, headless):
         # IMPORTANT: parent __init__ builds the scene, event_manager,
         # reward_manager, and calls self.reset(env_ids) once at the end. That
         # internal reset call goes through Python's MRO and hits OUR override
@@ -80,9 +79,7 @@ class TienKungCarryEnv(TienKungWalkEnv):
         # an env-id key in some IsaacLab versions and raises spurious KeyErrors.
         if getattr(self.cfg.scene, "enable_object", False):
             self.object: RigidObject = self.scene["object"]
-            self.payload_mass = torch.full(
-                (self.num_envs,), 0.0, device=self.device, dtype=torch.float32
-            )
+            self.payload_mass = torch.full((self.num_envs,), 0.0, device=self.device, dtype=torch.float32)
             self._prev_carry_pos_w = self.object.data.root_pos_w.clone()
             # Extend the observation noise vector by one zero entry so the
             # payload-mass channel stays noise-free (mass is a deterministic
@@ -100,15 +97,12 @@ class TienKungCarryEnv(TienKungWalkEnv):
         # control step (before any user-triggered reset) sees consistent
         # observation / physics. Without this, the cube would briefly be at
         # its USD-default mass (1.0 kg) while the obs says 0.0.
-        if (
-            self._curriculum_callable is not None
-            and getattr(self, "object", None) is not None
-        ):
+        if self._curriculum_callable is not None and getattr(self, "object", None) is not None:
             self._curriculum_callable(torch.arange(self.num_envs, device=self.device))
 
     # ------------------------------------------------------------------ helpers
 
-    def _make_weight_curriculum(self, cfg: "TienKungCarryFlatEnvCfg"):
+    def _make_weight_curriculum(self, cfg: TienKungCarryFlatEnvCfg):
         """Late-import the curriculum function to avoid an import cycle."""
         from legged_lab.mdp.curriculums import weight_curriculum
 
@@ -122,6 +116,8 @@ class TienKungCarryEnv(TienKungWalkEnv):
             self,
             reward_term_names=cfg.weight_curriculum_cfg["reward_term_names"],
             success_thresholds=cfg.weight_curriculum_cfg["success_thresholds"],
+            mean_reward_threshold=cfg.weight_curriculum_cfg.get("mean_reward_threshold"),
+            mean_reward_window=cfg.weight_curriculum_cfg.get("mean_reward_window", 100),
         )
 
     def _sync_carry_frame(self) -> None:
@@ -142,9 +138,7 @@ class TienKungCarryEnv(TienKungWalkEnv):
         reward.
         """
         bs = self.robot.data.body_state_w
-        lh = bs[:, self.elbow_body_ids[0], :3] + quat_apply(
-            bs[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec
-        )
+        lh = bs[:, self.elbow_body_ids[0], :3] + quat_apply(bs[:, self.elbow_body_ids[0], 3:7], self.left_arm_local_vec)
         rh = bs[:, self.elbow_body_ids[1], :3] + quat_apply(
             bs[:, self.elbow_body_ids[1], 3:7], self.right_arm_local_vec
         )
@@ -197,7 +191,29 @@ class TienKungCarryEnv(TienKungWalkEnv):
         TensorBoard's ``Episode_Termination/*`` channels and ``time_out``
         ratios remain accurate. We do this *after* ``super().reset(env_ids)``
         to avoid double-counting.
+
+        P_gate (Mean reward gate): ``super().reset(env_ids)`` invokes
+        :meth:`RewardManager.reset` which zeroes
+        ``self.reward_manager._episode_sums[name][env_ids]``. The
+        curriculum (called *after* super().reset) needs the just-finished
+        episode's per-env total reward to update the rolling Mean reward,
+        so we capture the sum across all reward terms for the resetting
+        envs *before* calling super().reset and stash it on
+        ``self._last_reset_episode_totals``. The curriculum reads and
+        consumes that buffer.
         """
+        if len(env_ids) == 0:
+            return
+        # CAPTURE per-env total reward BEFORE super().reset() zeroes the
+        # per-term sums. Only attempt this once the carry state and the
+        # reward_manager are both bound (the parent's __init__ triggers an
+        # internal reset before we finish binding — that one must no-op).
+        if getattr(self, "_curriculum_callable", None) is not None and getattr(self, "object", None) is not None:
+            total = torch.zeros(len(env_ids), device=self.device, dtype=torch.float32)
+            for term_sum in self.reward_manager._episode_sums.values():
+                total = total + term_sum[env_ids].detach()
+            self._last_reset_episode_totals = total
+
         super().reset(env_ids)
         # P0.4: bring forward the "carry dropped" termination flag into
         # ``reset_buf`` for any envs that crossed the soft floor in the
@@ -205,11 +221,17 @@ class TienKungCarryEnv(TienKungWalkEnv):
         # flag is per-env (set in the reward), so we just OR the whole tensor.
         if getattr(self, "_carry_dropped_buf", None) is not None:
             self.reset_buf = self.reset_buf | self._carry_dropped_buf
+            # P0.9 (debug instrumentation): log the carry-dropped fraction for
+            # the resetting envs. Independent of the base terminate_contacts /
+            # timeout channels that ``super().reset()`` already logged; an env
+            # can be in multiple categories (e.g. cube drop AND pelvis contact
+            # in the same step). Computed before ``_carry_dropped_buf.zero_()``
+            # so the per-step fraction is correct.
+            self.extras["log"]["Episode_Termination/carry_dropped"] = (
+                self._carry_dropped_buf[env_ids].float().mean()
+            )
             self._carry_dropped_buf.zero_()
         # Use getattr with a default so the very first reset (the one the parent
         # __init__ triggers before our carry state is bound) is a safe no-op.
-        if (
-            getattr(self, "_curriculum_callable", None) is not None
-            and getattr(self, "object", None) is not None
-        ):
+        if getattr(self, "_curriculum_callable", None) is not None and getattr(self, "object", None) is not None:
             self._curriculum_callable(env_ids)

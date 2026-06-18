@@ -99,8 +99,9 @@ def mirror_joint_tensor(original: torch.Tensor, mirrored: torch.Tensor, offset: 
 
 def mirror_observation_policy(obs):
     """
-    obs: (..., 750)  历史 10 帧，每帧 75 维
-    return: (..., 1500)  原观测 + 镜像观测 沿最后一维拼接
+    obs: (..., H * D)  actor history, H=10 frames, D=75 (or 76 for the carry task,
+          which appends a scalar payload_mass channel).
+    return: (..., 2 * H * D)  original obs concat with its mirror.
     """
     if obs is None:
         return obs
@@ -108,15 +109,28 @@ def mirror_observation_policy(obs):
     *batch_shape, _ = obs.shape
     batch_size = obs.shape[0] if batch_shape else 1
 
-    # 预分配输出张量，避免 vstack
-    result = torch.empty(batch_size * 2, 750, device=obs.device, dtype=obs.dtype)
+    # Infer history length + per-frame dim dynamically so the same function
+    # works for the walk task (D=75) and the carry task (D=76). The walk
+    # task uses history=10; the carry task uses the same history length.
+    total_dim = obs.shape[-1]
+    if total_dim % 10 == 0:
+        history_len = 10
+        per_frame = total_dim // history_len
+    else:
+        # Fallback: single-frame obs.
+        history_len = 1
+        per_frame = total_dim
+
+    # Pre-allocate output (avoid vstack).
+    result = torch.empty(
+        batch_size * 2, history_len * per_frame, device=obs.device, dtype=obs.dtype
+    )
     result[:batch_size] = obs
 
-    # reshape 用于向量化操作
-    obs_2d = obs.view(batch_size, 10, 75)
+    # Reshape for vectorized per-frame ops.
+    obs_2d = obs.view(batch_size, history_len, per_frame)
     flipped_2d = obs_2d.clone()
 
-    # 向量化镜像所有帧（不用循环）
     # base ang vel x,z
     flipped_2d[..., 0] = -obs_2d[..., 0]
     flipped_2d[..., 2] = -obs_2d[..., 2]
@@ -126,27 +140,31 @@ def mirror_observation_policy(obs):
     flipped_2d[..., 7] = -obs_2d[..., 7]
     flipped_2d[..., 8] = -obs_2d[..., 8]
 
-    # 关节镜像 - 展平后批量处理
-    flipped_flat = flipped_2d.view(batch_size * 10, 75)
-    obs_flat = obs_2d.view(batch_size * 10, 75)
+    # Joint mirroring - flatten for batched processing.
+    flipped_flat = flipped_2d.view(batch_size * history_len, per_frame)
+    obs_flat = obs_2d.view(batch_size * history_len, per_frame)
     mirror_joint_tensor(obs_flat, flipped_flat, 9)
-    mirror_joint_tensor(obs_flat, flipped_flat, 9+ACTION_NUM)
-    mirror_joint_tensor(obs_flat, flipped_flat, 9+2*ACTION_NUM)
+    mirror_joint_tensor(obs_flat, flipped_flat, 9 + ACTION_NUM)
+    mirror_joint_tensor(obs_flat, flipped_flat, 9 + 2 * ACTION_NUM)
 
-    # # gait_clock 和其他交换
+    # gait_clock and other swaps
     flipped_2d[..., 69], flipped_2d[..., 70] = obs_2d[..., 70].clone(), obs_2d[..., 69].clone()
     flipped_2d[..., 71], flipped_2d[..., 72] = obs_2d[..., 72].clone(), obs_2d[..., 71].clone()
     flipped_2d[..., 73], flipped_2d[..., 74] = obs_2d[..., 74].clone(), obs_2d[..., 73].clone()
-    flipped_2d = flipped_flat.view(batch_size, 10, 75)
+    # Any extra channels beyond index 75 (e.g., the carry task's payload_mass
+    # at index 75) are scalars that the mirror leaves untouched - they were
+    # already copied by `flipped_2d = obs_2d.clone()` at the top.
+    flipped_2d = flipped_flat.view(batch_size, history_len, per_frame)
 
-
-    result[batch_size:] = flipped_2d.view(batch_size, 750)
+    result[batch_size:] = flipped_2d.view(batch_size, history_len * per_frame)
     return result
 
 def mirror_observation_critic(obs):
     """
-    obs: (..., H * 80)  critic 历史观测，单帧 80 维（75 actor + 3 root_lin_vel + 2 feet_contact）
-    return: (..., 2 * H * 80)  原观测 + 镜像观测
+    obs: (..., H * D)  critic history. Default per-frame dim D=80 (75 actor +
+    3 root_lin_vel + 2 feet_contact). The carry task appends a scalar
+    payload_mass channel at the end, so D=81.
+    return: (..., 2 * H * D)  original obs concat with its mirror.
     """
     if obs is None:
         return obs
@@ -154,8 +172,21 @@ def mirror_observation_critic(obs):
     *batch_shape, _ = obs.shape
     batch_size = obs.shape[0] if batch_shape else 1
 
-    per_frame_dim = 9+3*ACTION_NUM + 6 + 5 # 80
-    history_len = obs.shape[-1] // per_frame_dim
+    # Default per-frame dim for the base walk/run tasks is 80; the carry task
+    # appends a scalar (81). We assume the obs layout is `actor_per_frame (75)
+    # + root_lin_vel (3) + feet_contact (2) + [optional extras]` and detect the
+    # base_dim from the total length and history_len (capped to 10 frames).
+    total_dim = obs.shape[-1]
+    base_per_frame = 9 + 3 * ACTION_NUM + 6 + 5  # 80
+    if total_dim % 10 == 0 and total_dim // 10 >= base_per_frame:
+        history_len = 10
+        per_frame_dim = total_dim // history_len
+    elif total_dim % base_per_frame == 0:
+        history_len = total_dim // base_per_frame
+        per_frame_dim = base_per_frame
+    else:
+        history_len = 1
+        per_frame_dim = total_dim
 
     # 预分配输出
     result = torch.empty(batch_size * 2, history_len * per_frame_dim, device=obs.device, dtype=obs.dtype)

@@ -43,30 +43,47 @@ To enable the hook on a new clone/machine, copy `.claude/hooks/check-conda-tienk
 All entry points live in `legged_lab/scripts/`. They auto-launch the Omniverse app via `AppLauncher`. Tasks with `sensor` in the name set `--enable_cameras=True` automatically.
 
 ```bash
-# Train (AMP PPO)
-python legged_lab/scripts/train.py --task=lite_walk --headless --logger=tensorboard --num_envs=4096
-python legged_lab/scripts/train.py --task=lite_run  --headless --logger=tensorboard --num_envs=4096
-python legged_lab/scripts/train.py --task=lite_swing --headless --logger=tensorboard --num_envs=4096
-python legged_lab/scripts/train.py --task=dex_walk  --headless --logger=tensorboard --num_envs=4096
-python legged_lab/scripts/train.py --task=dex_run   --headless --logger=tensorboard --num_envs=4096
+# Train (AMP PPO unless noted)
+python legged_lab/scripts/train.py --task=lite_walk              --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_walk_ppo          --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_walk_stand        --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_run               --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_swing             --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_carry             --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_walk_with_sensor  --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=lite_run_with_sensor   --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=dex_walk               --headless --logger=tensorboard --num_envs=4096
+python legged_lab/scripts/train.py --task=dex_run                --headless --logger=tensorboard --num_envs=4096
 
 # Play (loads checkpoint, exports JIT/ONNX policy to logs/.../exported/)
 python legged_lab/scripts/play.py --task=lite_walk --num_envs=1
 python legged_lab/scripts/play.py --task=lite_run  --num_envs=1
 
-# Visualize AMP motion (loads motion_visualization/<task>.txt)
-python legged_lab/scripts/play_amp_animation.py --task=walk --num_envs=1
-python legged_lab/scripts/play_amp_animation.py --task=walk_with_sensor --num_envs=1
+# Visualize AMP motion (loads motion_visualization/<task>.txt) — note: these scripts
+# use the *visualization* task names (walk / run / walk_with_sensor / run_with_sensor),
+# NOT the `lite_*` prefixes used by train/play.
+python legged_lab/scripts/play_amp_animation.py --task=walk              --num_envs=1
+python legged_lab/scripts/play_amp_animation.py --task=run               --num_envs=1
+python legged_lab/scripts/play_amp_animation.py --task=walk_with_sensor  --num_envs=1
+python legged_lab/scripts/play_amp_animation.py --task=run_with_sensor   --num_envs=1
 
 # Sim2Sim in MuJoCo (uses Exported_policy/{walk,run}.pt by default)
 python legged_lab/scripts/sim2sim.py --task walk --policy Exported_policy/walk.pt --duration 100
 python legged_lab/scripts/sim2sim.py --task run  --policy Exported_policy/run.pt  --duration 100
 
-# Convert GMR retargeted motion (.pkl) to the txt format used for visualization
-python legged_lab/scripts/gmr_data_conversion.py --input_pkl <pkl> --output_txt legged_lab/envs/lite/datasets/motion_visualization/motion.txt
-
-# Convert visualization txt into expert motion for AMP training
-python legged_lab/scripts/play_amp_animation.py --task=walk --num_envs=1 --save_path legged_lab/envs/lite/datasets/motion_amp_expert/motion.txt --fps 30.0
+# Two-stage motion pipeline (GMR .pkl → visualization txt → AMP expert txt)
+# Stage 1: convert GMR-retargeted motion into the visualization txt format.
+python legged_lab/scripts/gmr_data_conversion.py \
+    --input_pkl  <path/to/robot_motion.pkl> \
+    --output_txt legged_lab/envs/lite/datasets/motion_visualization/motion.txt
+# Then point the relevant cfg's `amp_motion_files_display` at this txt and run
+# `play_amp_animation.py` to preview it in Isaac Sim.
+#
+# Stage 2: re-play the visualization txt under the AMP env, sample the AMP
+# observation buffer, and write the expert motion txt used at training time.
+python legged_lab/scripts/play_amp_animation.py --task=walk --num_envs=1 \
+    --save_path legged_lab/envs/lite/datasets/motion_amp_expert/motion.txt --fps 30.0
+# Finally point the cfg's `amp_motion_files` at this expert txt before training.
 ```
 
 Loggers supported: `tensorboard`, `wandb`, `neptune`, `swanlab` (selected via `--logger`). Resume via `--resume --load_run <run_name> --checkpoint model_<N>.pt`. Use `--distributed` for multi-GPU.
@@ -109,21 +126,28 @@ TienKung-Lab/
 
 ### Task registry
 
-Tasks are registered in `legged_lab/envs/__init__.py` against the global `task_registry` (`legged_lab/utils/task_registry.py`). Each entry maps `name → (VecEnv class, EnvCfg, AgentCfg)`. The five registered tasks:
+Tasks are registered in `legged_lab/envs/__init__.py` against the global `task_registry` (`legged_lab/utils/task_registry.py`). Each entry maps `name → (VecEnv class, EnvCfg, AgentCfg)`. The ten registered tasks:
 
 | Name | Env class | Variant |
 | --- | --- | --- |
-| `lite_walk` | `TienKungEnv` (`legged_lab/envs/lite/tienkung_env.py`) | TienKung 2 Lite, walk, AMP |
-| `lite_run` | `TienKungEnv` | TienKung 2 Lite, run, AMP |
-| `lite_swing` | `TienKungSwingEnv` (`legged_lab/envs/lite/robot/tienkung_env.py`) | TienKung 2 Lite, swing (prefab) |
+| `lite_walk` | `TienKungWalkEnv` (`legged_lab/envs/lite/env/walk_env.py`) | TienKung 2 Lite, walk, AMP |
+| `lite_walk_ppo` | `TienKungWalkEnv` | Walk, PPO (no-AMP) variant for comparison |
+| `lite_walk_stand` | `TienKungWalkStandEnv` (`legged_lab/envs/lite/env/walk_stand_env.py`) | Walk-stand still-task |
+| `lite_run` | `TienKungWalkEnv` | TienKung 2 Lite, run, AMP |
+| `lite_swing` | `TienKungSwingEnv` (`legged_lab/envs/lite/env/swing_env.py`) | TienKung 2 Lite, swing (prefab) |
+| `lite_carry` | `TienKungCarryEnv` (`legged_lab/envs/lite/env/carry_env.py`, extends `TienKungWalkEnv`) | Walk + box-carry payload |
+| `lite_walk_with_sensor` | `TienKungWalkEnv` | Walk with height_scanner / lidar / depth_camera |
+| `lite_run_with_sensor` | `TienKungWalkEnv` | Run with height_scanner / lidar / depth_camera |
 | `dex_walk` | `DexEnv` (`legged_lab/envs/dex/dex_env.py`) | TienKung 2 Pro / Dex |
 | `dex_run` | `DexEnv` | TienKung 2 Pro / Dex |
 
 `scripts/train.py` and `scripts/play.py` resolve `--task` to `(env_class, env_cfg, agent_cfg)` via `task_registry.get_cfgs(name)`, then dispatch to the runner class determined by `agent_cfg.runner_class_name` (e.g. `OnPolicyRunner` or `AmpOnPolicyRunner`).
 
+The legacy `TienKungEnv` name was renamed to `TienKungWalkEnv`; code/comments still referencing `TienKungEnv` should be read as `TienKungWalkEnv`. `play_amp_animation.py` accepts the visualization task names `walk` / `run` / `walk_with_sensor` / `run_with_sensor` (not the `lite_*` prefixes used by train/play).
+
 ### Environment construction
 
-`BaseEnv` (`legged_lab/envs/base/base_env.py`) is the **non-AMP** VecEnv base. It is overridden by `TienKungEnv` in `legged_lab/envs/lite/tienkung_env.py` to add:
+The base VecEnv classes live in `rsl_rl/rsl_rl/env/`; per-task subclasses live under `legged_lab/envs/lite/env/` and `legged_lab/envs/dex/`. The `BaseEnv` (`legged_lab/envs/base/base_env.py`) is the **non-AMP** helper / example base. The active AMP/walk/run environment is `TienKungWalkEnv` (`legged_lab/envs/lite/env/walk_env.py`), which adds:
 
 - **Gait parameterization** (`self.gait_phase`, `gait_cycle`, `phase_ratio`, `phase_offset`) — `_calculate_gait_para()` updates phase from `episode_length_buf * step_dt / gait_cycle`, with per-env randomization if `gait.gait_cycle_lower/upper` is set.
 - **Joint-body mapping caches** (`left_leg_ids`, `right_leg_ids`, `left_arm_ids`, `right_arm_ids`, `feet_body_ids`, `elbow_body_ids`, `ankle_joint_ids`) — used by rewards and AMP observation extraction.
@@ -131,6 +155,8 @@ Tasks are registered in `legged_lab/envs/__init__.py` against the global `task_r
 - **Optional GridAdaptiveCurriculum** for velocity commands (`legged_lab/envs/base/command_curriculum.py`) — enabled when `cfg.command_curriculum_cfg` is set; tracks per-env success on `(lin_vel_x, lin_vel_y, ang_vel_z)` bins and resamples when threshold is met.
 - **DelayBuffer** for action delay and **CircularBuffer** for actor/critic observation history (`actor_obs_history_length`, `critic_obs_history_length`).
 - **Optional sensors** added in scene: height scanner (RayCaster), LiDAR, depth camera (`TiledCamera`).
+- **`TienKungCarryEnv`** subclasses `TienKungWalkEnv` to add a box-carrying payload (box rigid body attached to the robot, additional rewards / curriculum around carry pose).
+- **`TienKungWalkStandEnv`** is a separate, still-task `VecEnv` (not derived from `TienKungWalkEnv`) used for the `lite_walk_stand` task.
 
 `step()` runs `cfg.sim.decimation` physics sub-steps per RL step (`step_dt = dt * decimation`), applies domain-randomization events (`startup` / `reset` / `interval` modes), checks reset (contact-force termination + timeout), then computes the next observation.
 
@@ -138,9 +164,16 @@ Tasks are registered in `legged_lab/envs/__init__.py` against the global `task_r
 
 - `legged_lab/envs/base/base_config.py` — primitive `@configclass` building blocks: `BaseSceneCfg`, `RobotCfg`, `RewardCfg`, `DomainRandCfg` (`EventCfg` with `physics_material`, `add_base_mass`, `reset_base`, `reset_robot_joints`, `push_robot`), `CommandsCfg`, `NormalizationCfg`, `ObsScalesCfg`, `NoiseCfg`, `SimCfg`.
 - `legged_lab/envs/base/base_env_config.py` — `BaseEnvCfg` (composes the primitives) and `BaseAgentCfg` (RSL-RL PPO + ActorCritic defaults: hidden dims `[512, 256, 128]`, lr `1e-3`, gamma `0.99`, lam `0.95`, KL `0.01`, 5 epochs, 4 minibatches, 24 steps/env).
-- `legged_lab/envs/lite/walk_cfg.py` / `run_cfg.py` / `walk_with_sensor_cfg.py` / `run_with_sensor_cfg.py` — concrete `TienKungWalkFlatEnvCfg` etc. that subclass / replace these and add `LiteRewardCfg` plus a `GaitCfg`. `TienkungEventCfg` adds `randomize_pd_gains`, `randomize_apply_external_force_torque`, `randomize_rigid_body_com`, `randomize_joint_params`.
-- `legged_lab/envs/lite/experiment/swing_cfg.py` — `lite_swing` task config.
-- `legged_lab/envs/dex/{walk,run}_cfg.py` — dexterous variants.
+- `legged_lab/envs/lite/config/` — concrete Lite task configs:
+  - `walk_cfg.py` — `lite_walk` (`TienKungWalkFlatEnvCfg` + AMP)
+  - `walk_ppo_cfg.py` — `lite_walk_ppo` (same env, no-AMP PPO baseline)
+  - `walk_stand_cfg.py` — `lite_walk_stand` (still-task)
+  - `run_cfg.py` — `lite_run`
+  - `walk_with_sensor_cfg.py` / `run_with_sensor_cfg.py` — `lite_*_with_sensor` variants with `height_scanner` / `lidar` / `depth_camera`
+  - `swing_cfg.py` — `lite_swing` (prefab swing task)
+  - `carry_cfg.py` — `lite_carry` (box payload on top of walk)
+  - Each adds a `LiteRewardCfg` and a `GaitCfg`. `TienkungEventCfg` adds `randomize_pd_gains`, `randomize_apply_external_force_torque`, `randomize_rigid_body_com`, `randomize_joint_params`.
+- `legged_lab/envs/dex/{walk,run}_cfg.py` (and `walk_with_sensor_cfg.py` / `run_with_sensor_cfg.py`) — dexterous variants.
 
 ### Rewards & symmetry
 
@@ -158,9 +191,9 @@ Tasks are registered in `legged_lab/envs/__init__.py` against the global `task_r
 - `rsl_rl/rsl_rl/runners/amp_on_policy_runner.py` — AMP-PPO runner (uses `AMPLoader` from `rsl_rl/utils/motion_loader.py`).
 - `rsl_rl/rsl_rl/algorithms/amp_ppo.py` — AMP discriminator loss added to PPO.
 - `rsl_rl/rsl_rl/modules/discriminator.py` — motion discriminator (MLP).
-- `rsl_rl/rsl_rl/utils/motion_loader.py` / `motion_loader_for_display.py` — txt motion file loaders. `AMPLoader` is the training-time expert buffer; `AMPLoaderDisplay` is the playback loader used by `play_amp_animation.py` and `TienKungEnv.visualize_motion`.
+- `rsl_rl/rsl_rl/utils/motion_loader.py` / `motion_loader_for_display.py` — txt motion file loaders. `AMPLoader` is the training-time expert buffer; `AMPLoaderDisplay` is the playback loader used by `play_amp_animation.py` and `TienKungWalkEnv.visualize_motion`.
 
-AMP expert motion format: rows of `[dof_pos(20), dof_vel(20), end-effector positions(12)]`. Visualization motion format: `[root_pos(3), euler(3), dof_pos(20), root_lin_vel(3), root_ang_vel(3), dof_vel(20)]`. The two-stage conversion (GMR pkl → visualization txt → expert txt) lives in `legged_lab/scripts/gmr_data_conversion.py` and `legged_lab/scripts/play_amp_animation.py --save_path`.
+AMP expert motion format: rows of `[dof_pos(20), dof_vel(20), end-effector positions(12)]`. Visualization motion format: `[root_pos(3), euler(3), dof_pos(20), root_lin_vel(3), root_ang_vel(3), dof_vel(20)]`. The two-stage conversion (GMR pkl → visualization txt → expert txt) lives in `legged_lab/scripts/gmr_data_conversion.py` and `legged_lab/scripts/play_amp_animation.py --save_path` — after each stage, repoint the corresponding cfg field (`amp_motion_files_display` for stage-1, `amp_motion_files` for stage-2) before launching the next step.
 
 ### Sim2Sim (MuJoCo)
 
@@ -182,7 +215,7 @@ The MuJoCo model path defaults to `legged_lab/assets/tienkung2_lite/mjcf/tienkun
 
 ### Visualizing motion with sensors
 
-`walk_with_sensor` and `run_with_sensor` task configs enable `height_scanner`, `lidar`, and/or `depth_camera` on the robot. Camera rendering is enabled at startup by `train.py` / `play.py` / `play_amp_animation.py` when the task name contains `sensor`. The depth-camera data is flattened and concatenated to actor/critic observations in `TienKungEnv.compute_observations()`.
+`walk_with_sensor` and `run_with_sensor` task configs enable `height_scanner`, `lidar`, and/or `depth_camera` on the robot. Camera rendering is enabled at startup by `train.py` / `play.py` / `play_amp_animation.py` when the task name contains `sensor`. The depth-camera data is flattened and concatenated to actor/critic observations in `TienKungWalkEnv.compute_observations()`.
 
 ### CLI args
 

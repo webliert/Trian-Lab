@@ -217,6 +217,13 @@ class TienKungWalkEnv(VecEnv):
         self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
         self.sim_step_counter = 0
         self.time_out_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        # P0.9 (debug instrumentation): pre-allocate reset_buf so the very first
+        # reset() call (from __init__) can index it for the new
+        # Episode_Termination/* log channels without an AttributeError. It is
+        # normally written by check_reset() in step(), but the init reset
+        # happens before any step has run. All-zeros is correct for the init
+        # reset (no envs have actually terminated yet).
+        self.reset_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
 
         self.left_arm_local_vec = torch.tensor([0.0, 0.0, -0.3], device=self.device).repeat((self.num_envs, 1))
         self.right_arm_local_vec = torch.tensor([0.0, 0.0, -0.3], device=self.device).repeat((self.num_envs, 1))
@@ -443,6 +450,18 @@ class TienKungWalkEnv(VecEnv):
 
         reward_extras = self.reward_manager.reset(env_ids)
         self.extras["log"].update(reward_extras)
+        # P0.9 (debug instrumentation): break down the per-step reset reason so
+        # we can tell on TensorBoard whether episodes are dying from
+        # terminate_contacts (the robot tipped over / knee/elbow/shoulder/pelvis
+        # hit something) vs timeout (the policy survived the full episode).
+        # Both values are fractions of the resetting envs in [0, 1]; ``env_ids``
+        # is the per-step subset of envs whose episode just ended. Subclasses
+        # (e.g. ``TienKungCarryEnv``) can OR additional reasons into
+        # ``reset_buf`` after ``super().reset()`` and add their own channels.
+        self.extras["log"]["Episode_Termination/terminate_contacts"] = (
+            (self.reset_buf[env_ids] & ~self.time_out_buf[env_ids]).float().mean()
+        )
+        self.extras["log"]["Episode_Termination/timeout"] = self.time_out_buf[env_ids].float().mean()
         self.extras["time_outs"] = self.time_out_buf
 
         self.command_generator.reset(env_ids)

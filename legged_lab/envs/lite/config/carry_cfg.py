@@ -64,7 +64,7 @@ from legged_lab.envs.base.base_config import (
     RobotCfg,
     SimCfg,
 )
-from legged_lab.envs.lite.config.walk_cfg import GaitCfg, LiteRewardCfg
+from legged_lab.envs.lite.config.walk_ppo_cfg import GaitCfg, LiteRewardCfg
 from legged_lab.mdp.symmetryLite import data_augmentation_func_g1
 from legged_lab.terrains import ROUGH_TERRAINS_CFG
 
@@ -88,52 +88,57 @@ class TienkungEventCfg(EventCfg):
 class LiteRewardCfgCarry(LiteRewardCfg):
     """Walking rewards (inherited) + cube-related rewards + pose reward.
 
-    The base class is :class:`legged_lab.envs.lite.config.walk_cfg.LiteRewardCfg`,
-    so all inherited reward weights / thresholds follow the walk task's
-    baseline (e.g. ``track_lin_vel_xy_exp = 1.0``, ``feet_y_distance = -2.0``,
-    ``termination_penalty = -200.0``).
+    The base class is :class:`legged_lab.envs.lite.config.walk_ppo_cfg.LiteRewardCfg`,
+    so all inherited reward weights / thresholds follow the vanilla-PPO walk
+    task's baseline (e.g. ``track_lin_vel_xy_exp = 1.0``, ``alive_reward = 0.5``,
+    ``feet_too_near = -5.0``, ``termination_penalty = -200.0``,
+    ``joint_deviation_legs = -0.02``).
 
-    P0 (carry-task fix) applied here:
+    The class adds three deltas on top of the inherited set:
 
-    * P0.2/P0.4 — the three cube rewards now use the per-env gate (P0.1)
-      and the cube-state signals that P0.3 made non-trivial. Each
-      ``use_gate=False`` here so the raw signal is observable in early
-      training; once the policy starts walking the gates will kick in via
-      the default ``gate_threshold`` parameters.
-    * P0.5 — new ``arm_pose_l1`` reward (target = default pose for now;
-      P3.2 will replace with the offline-IK carry pose).
-    * P0.6 — weaken / null the inherited terms that fight the carry task:
-      - ``termination_penalty``: -200 -> -10 (less negative shock when the
-        robot collapses, keeps mean_reward from being crushed).
-      - ``feet_y_distance``: -2 -> -1 (carry does not need a tightly
-        closed stance; -2 over-penalizes any natural foot spread).
-      - ``joint_deviation_arms = None``: the inherited term uses the
-        default pose (arms at sides) as its target, which is the opposite
-        of the carry pose. Setting it to None makes the RewardManager
-        skip the term entirely for the carry task only. (Disabling it
-        here only affects the carry task — the walk/run tasks use the
-        parent ``walk.LiteRewardCfg`` directly and are not impacted.)
-    * ``undesired_contacts`` is left at the inherited default (it includes
-      ``shoulder_roll.*`` and ``elbow_pitch.*``) because accidentally
-      brushing the cube with the arms is still a real safety hazard.
+    * **Three cube rewards** (``keep_object_in_hand``, ``object_orientation_keep``,
+      ``object_not_dropping``) with their carry-task weights; ``use_gate=False``
+      so the raw signals are observable in early training, and the per-env
+      ``episode_progress_gate`` is added back automatically when the cube-gate
+      default ``gate_threshold`` is reached.
+    * **Carry-specific ``arm_pose_l1``** (weight=-0.5, target=default pose).
+      This shadows the inherited walk_ppo ``arm_pose_l1`` (weight=+1.0) and is
+      a placeholder until the offline-IK carry-pose target is wired in
+      (P3.2 deliverable). The negative weight on a non-positive function
+      reward is a deliberate "arms away from default" signal so the policy
+      can find a non-default carry-pose configuration; the cube-state rewards
+      anchor the actual pose.
+    * **``joint_deviation_arms = None``** — the inherited term targets
+      ``shoulder_roll``/``shoulder_yaw`` default joint pos (arms at sides),
+      which is the opposite of the carry pose. Disabling it here only
+      affects the carry task; the walk/run tasks still inherit the original
+      term from :class:`walk_ppo_cfg.LiteRewardCfg`.
+
+    The P0.6 weakened values for ``termination_penalty`` and
+    ``feet_y_distance`` have been reverted to walk_ppo defaults; the
+    Mean reward gate in :func:`legged_lab.mdp.curriculums.weight_curriculum`
+    now protects against early-training instability, so the previous
+    safety net is no longer needed.
     """
 
-    # P0.2 / P0.4 — cube rewards with the new ``use_gate`` switch.
-    keep_object_in_hand = RewTerm(
-        func=mdp.keep_object_in_hand, weight=5.0, params={"dist_scale": 0.10, "use_gate": False}
-    )
-    object_orientation_keep = RewTerm(
-        func=mdp.object_orientation_keep, weight=1.0, params={"use_gate": False}
-    )
-    object_not_dropping = RewTerm(
-        func=mdp.object_not_dropping, weight=2.0, params={"use_gate": False}
-    )
+    # Cube rewards (carry-task additions on top of inherited walking rewards).
+    # keep_object_in_hand = RewTerm(
+    #     func=mdp.keep_object_in_hand, weight=5.0, params={"dist_scale": 0.10, "use_gate": False}
+    # )
+    keep_object_in_hand = None
+    
+    # object_orientation_keep = RewTerm(func=mdp.object_orientation_keep, weight=1.0, params={"use_gate": False})
+    object_orientation_keep = None
+    
+    # object_not_dropping = RewTerm(func=mdp.object_not_dropping, weight=2.0, params={"use_gate": False})
+    object_not_dropping = None
 
-    # P0.5 — carry-pose reward. Targets default for now; P3.2 will swap in
-    # the offline-IK result.
+    # Carry-pose reward. Targets default for now; P3.2 will swap in
+    # the offline-IK result. The weight=-0.5 sign is a placeholder
+    # (see class docstring).
     arm_pose_l1 = RewTerm(
         func=mdp.arm_pose_l1,
-        weight=-0.5,
+        weight=1.0,
         params={
             "use_default_if_none": True,
             "asset_cfg": SceneEntityCfg(
@@ -152,13 +157,11 @@ class LiteRewardCfgCarry(LiteRewardCfg):
         },
     )
 
-    # P0.6 — weaken the inherited terms that fight the carry task.
-    termination_penalty = RewTerm(func=mdp.is_terminated, weight=-10.0)
-    feet_y_distance = RewTerm(func=mdp.feet_y_distance, weight=-1.0)
-    # The default joint_deviation_arms uses default joint pos as target
-    # (arms at sides); this directly fights the carry pose. Disabling it
-    # here only affects the carry task — the walk/run tasks still inherit
-    # the original term from ``LiteRewardCfg``.
+    # Disable the inherited ``joint_deviation_arms`` (weight=-0.2, default
+    # joint-pos target) because the carry pose has shoulders rolled forward;
+    # the inherited target is the opposite of what the carry task wants.
+    # Disabling it here only affects the carry task — the walk/run tasks
+    # still inherit the original term from ``walk_ppo_cfg.LiteRewardCfg``.
     joint_deviation_arms = None
 
 
@@ -177,7 +180,7 @@ class TienKungCarryFlatEnvCfg:
 
     # -- scene --------------------------------------------------------------
     scene: BaseSceneCfg = BaseSceneCfg(
-        max_episode_length_s=10.0,
+        max_episode_length_s=20.0,
         num_envs=4096,
         env_spacing=2.5,
         robot=TIENKUNG2LITE_CFG,
@@ -229,7 +232,7 @@ class TienKungCarryFlatEnvCfg:
     )
     commands: CommandsCfg = CommandsCfg(
         resampling_time_range=(8.0, 12.0),
-        rel_standing_envs=0.4,
+        rel_standing_envs=0.2,
         rel_heading_envs=1.0,
         heading_command=True,
         heading_control_stiffness=0.5,
@@ -308,65 +311,76 @@ class TienKungCarryFlatEnvCfg:
                 interval_range_s=(10.0, 15.0),
                 params={"velocity_range": {"x": (-1.0, 1.0), "y": (-1.0, 1.0)}},
             ),
-            randomize_pd_gains=EventTerm(
-                func=mdp.randomize_actuator_gains,
-                mode="reset",
-                params={
-                    "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-                    "stiffness_distribution_params": (0.75, 1.25),
-                    "damping_distribution_params": (0.75, 1.25),
-                    "operation": "scale",
-                    "distribution": "uniform",
-                },
-            ),
-            randomize_apply_external_force_torque=EventTerm(
-                func=mdp.apply_external_force_torque,
-                mode="reset",
-                params={
-                    "asset_cfg": SceneEntityCfg("robot", body_names="pelvis"),
-                    "force_range": (-20.0, 20.0),
-                    "torque_range": (-5.0, 5.0),
-                },
-            ),
-            randomize_joint_params=EventTerm(
-                func=mdp.randomize_joint_parameters,
-                mode="startup",
-                params={
-                    "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
-                    "friction_distribution_params": (0.001, 0.6),
-                    "armature_distribution_params": (0.002, 0.060),
-                    "operation": "abs",
-                    "distribution": "uniform",
-                },
-            ),
-            randomize_rigid_body_com=EventTerm(
-                func=mdp.randomize_rigid_body_com,
-                mode="startup",
-                params={
-                    "asset_cfg": SceneEntityCfg("robot", body_names=["pelvis"]),
-                    "com_range": {
-                        "x": (-0.05, 0.05),
-                        "y": (-0.05, 0.05),
-                        "z": (0.0, 0.0),
-                    },
-                },
-            ),
+            # P0.8 (carry-task fix): disable the per-reset external-force/torque
+            # kicker. set_external_force_and_torque is PERSISTENT in the PhysX
+            # buffer, so mode="reset" with force_range=(-20, 20) applies a
+            # constant ~20N / ~5Nm to the pelvis for the entire episode. On a
+            # 50 kg humanoid that tops the policy in ~35 steps (= 0.355 s at
+            # step_dt=0.01 s) -- exactly the observed mean episode length. The
+            # other 3 carry-only DR terms are one-shot (startup) or modest
+            # scale-only (pd_gains 0.75-1.25) and are not the dominant cause.
+            # Re-introduce a bounded perturbation in a follow-up if desired.
+            randomize_apply_external_force_torque=None,
+            randomize_joint_params=None,
+            randomize_rigid_body_com=None,
+            randomize_pd_gains=None,
         ),
+        #     randomize_pd_gains=EventTerm(
+        #         func=mdp.randomize_actuator_gains,
+        #         mode="reset",
+        #         params={
+        #             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+        #             "stiffness_distribution_params": (0.75, 1.25),
+        #             "damping_distribution_params": (0.75, 1.25),
+        #             "operation": "scale",
+        #             "distribution": "uniform",
+        #         },
+        #     ),
+        #     randomize_joint_params=EventTerm(
+        #         func=mdp.randomize_joint_parameters,
+        #         mode="startup",
+        #         params={
+        #             "asset_cfg": SceneEntityCfg("robot", joint_names=".*"),
+        #             "friction_distribution_params": (0.001, 0.6),
+        #             "armature_distribution_params": (0.002, 0.060),
+        #             "operation": "abs",
+        #             "distribution": "uniform",
+        #         },
+        #     ),
+        #     randomize_rigid_body_com=EventTerm(
+        #         func=mdp.randomize_rigid_body_com,
+        #         mode="startup",
+        #         params={
+        #             "asset_cfg": SceneEntityCfg("robot", body_names=["pelvis"]),
+        #             "com_range": {
+        #                 "x": (-0.05, 0.05),
+        #                 "y": (-0.05, 0.05),
+        #                 "z": (0.0, 0.0),
+        #             },
+        #         },
+        #     ),
+        # ),
         action_delay=ActionDelayCfg(enable=False, params={"max_delay": 5, "min_delay": 0}),
     )
 
     sim: SimCfg = SimCfg(
-        dt=0.0025,
+        dt=0.005,
         decimation=4,
         physx=PhysxCfg(gpu_max_rigid_patch_count=10 * 2**15),
     )
 
     # -- mass curriculum ----------------------------------------------------
-    # reward_term_names[0] is the Phase A->B gate (track_lin_vel_xy_exp),
-    # reward_term_names[1] is the Phase B->C gate (keep_object_in_hand).
+    # reward_term_names[0] is the Phase A->B per-term gate (track_lin_vel_xy_exp),
+    # reward_term_names[1] is the Phase B->C per-term gate (keep_object_in_hand).
+    # The A->B transition is COMPOUND-gated: both the per-term threshold AND
+    # the rolling "Mean reward" (Train/mean_reward equivalent) must hold for
+    # ``gate_hold_resets`` consecutive reset cycles. The Mean reward gate
+    # ensures the policy is globally good before box-mass is introduced.
     weight_curriculum_cfg: dict = {
         "reward_term_names": ["track_lin_vel_xy_exp", "keep_object_in_hand"],
         "success_thresholds": [1.5, 0.6],
+        "mean_reward_threshold": 30.0,
+        "mean_reward_window": 100,
     }
 
 

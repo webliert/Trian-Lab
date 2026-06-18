@@ -33,6 +33,13 @@ parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
+parser.add_argument(
+    "--carry_mass_max",
+    type=float,
+    default=None,
+    help="Override cfg.scene.carry_mass_max (used by lite_carry to pin the cube weight for "
+    "play-time verification at e.g. 0/2/5/10 kg).",
+)
 
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -89,6 +96,12 @@ def play():
 
     agent_cfg = update_rsl_rl_cfg(agent_cfg, args_cli)
     env_cfg.scene.seed = agent_cfg.seed
+
+    # Allow play-time override of the cube's max carry mass (lite_carry). This
+    # does not change the policy, just pins the cube mass for the duration of
+    # the play session so we can sanity-check behavior at 0/2/5/10 kg.
+    if getattr(args_cli, "carry_mass_max", None) is not None and hasattr(env_cfg.scene, "carry_mass_max"):
+        env_cfg.scene.carry_mass_max = float(args_cli.carry_mass_max)
 
     env_class = task_registry.get_task_class(env_class_name)
     env = env_class(env_cfg, args_cli.headless)

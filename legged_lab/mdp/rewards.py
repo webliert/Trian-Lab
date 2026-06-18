@@ -51,7 +51,15 @@ def tolerance(x, bounds=(0.0, 0.0), margin=0.1, value_at_margin=0.1):
 
 def episode_progress_gate(env: BaseEnv | DexEnv, threshold: float = 700.0) -> torch.Tensor:
     """
-    Returns a per-env gate that activates once the mean episode length exceeds the threshold.
+    Returns a per-env gate that activates once the env's own episode length exceeds the threshold.
+
+    P0.1 (carry-task fix): previously this was a global mean gate
+    (``(episode_lengths.mean() >= threshold).float() * ones``) which forced the cube rewards
+    to 0 for every env whenever the buffer-wide mean episode length was below the threshold.
+    Under heavy early-training termination this created a chicken-and-egg deadlock:
+    terminate early -> mean episode short -> gate never opens -> no cube gradient -> never
+    learn to walk. The fix is to compare per-env episode_length_buf against the threshold
+    so each env's cube reward activates independently as soon as *that env* has progressed.
     """
     episode_lengths = getattr(env, "episode_length_buf", None)
     if episode_lengths is None:
@@ -64,8 +72,7 @@ def episode_progress_gate(env: BaseEnv | DexEnv, threshold: float = 700.0) -> to
             return torch.ones_like(episode_lengths, dtype=torch.float)
         effective_threshold = min(threshold, float(max_len))
 
-    gate_scalar = (episode_lengths.float().mean() >= effective_threshold).float()
-    return gate_scalar * torch.ones_like(episode_lengths, dtype=torch.float)
+    return (episode_lengths.float() >= effective_threshold).float()
 
 def track_lin_vel_xy_yaw_frame_exp(
     env: BaseEnv | DexEnv, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
@@ -636,7 +643,206 @@ def stand_still_body_lin_vel(
     
     # Penalize all linear velocities (xyz)
     lin_vel_penalty = torch.sum(torch.square(asset.data.root_lin_vel_w[:, :3]), dim=1)
-    
+
     # Only apply penalty when standing
     return lin_vel_penalty * zero_flag.float()
+
+
+# -----------------------------------------------------------------------------
+# Carry-task reward terms (used by lite_carry).
+# Each term guards on `hasattr(env, "object")` so the cfg can be safely shared
+# with non-carry tasks (or used during early init before the object is spawned).
+# -----------------------------------------------------------------------------
+
+def _carry_target_world(env) -> torch.Tensor:
+    """Compute the world-frame carry target: midpoint of two hands + root forward 18cm.
+
+    Returns:
+        Tensor of shape (num_envs, 3) in world frame.
+    """
+    bs = env.robot.data.body_state_w
+    lh = bs[:, env.elbow_body_ids[0], :3] + math_utils.quat_apply(
+        bs[:, env.elbow_body_ids[0], 3:7], env.left_arm_local_vec)
+    rh = bs[:, env.elbow_body_ids[1], :3] + math_utils.quat_apply(
+        bs[:, env.elbow_body_ids[1], 3:7], env.right_arm_local_vec)
+    mid = 0.5 * (lh + rh)
+    fwd = math_utils.quat_apply(
+        env.robot.data.root_quat_w,
+        torch.tensor([0.18, 0.0, 0.0], device=env.device).expand(env.num_envs, 3),
+    )
+    return mid + fwd
+
+
+def keep_object_in_hand(
+    env: "BaseEnv | DexEnv",
+    dist_scale: float = 0.10,
+    gate_threshold: float = 200.0,
+    use_gate: bool = True,
+) -> torch.Tensor:
+    """Reward for keeping the carried object close to the carry target between the hands.
+
+    P0.2 (carry-task fix):
+      * ``dist_scale`` widened 0.05 -> 0.10 so the Gaussian still has gradient when
+        ``_sync_carry_frame`` introduces small teleportation errors.
+      * ``gate_threshold`` reduced 400 -> 200 to coordinate with the per-env gate
+        in ``episode_progress_gate`` (P0.1). Each env now activates independently
+        after 200 of its own steps rather than waiting for the buffer-wide mean.
+      * ``use_gate`` lets the carry cfg turn the gate off entirely (initial P0
+        validation uses this to inspect the raw dist signal distribution).
+
+    Args:
+        env: The environment instance.
+        dist_scale: Length scale of the Gaussian (smaller = stricter). Distance in meters
+            at which the reward drops to ~exp(-1) ≈ 0.37.
+        gate_threshold: Episode-progress threshold before the reward activates.
+        use_gate: When False, the episode_progress_gate is skipped (raw reward only).
+    """
+    if not hasattr(env, "object") or env.object is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    target = _carry_target_world(env)
+    dist = torch.norm(env.object.data.root_pos_w - target, dim=-1)
+    reward = torch.exp(-(dist ** 2) / (dist_scale ** 2))
+    if use_gate:
+        reward = reward * episode_progress_gate(env, threshold=gate_threshold)
+    return reward
+
+
+def object_orientation_keep(
+    env: "BaseEnv | DexEnv",
+    tilt_scale: float = 0.1,
+    gate_threshold: float = 200.0,
+    use_gate: bool = True,
+) -> torch.Tensor:
+    """Reward for keeping the carried object upright (projected gravity on its xy plane small).
+
+    P0.4 (carry-task fix):
+      * Coordinates with P0.1 (per-env gate) and P0.3 (cube now has real tilt
+        noise) so this reward can actually deliver gradient.
+      * ``use_gate`` lets the carry cfg turn the gate off for raw-signal
+        validation.
+
+    Args:
+        env: The environment instance.
+        tilt_scale: Tilt length scale (smaller = stricter). The reward drops to ~0.37
+            when the in-plane gravity component magnitude equals this value.
+        gate_threshold: Episode-progress threshold before the reward activates.
+        use_gate: When False, the episode_progress_gate is skipped (raw reward only).
+    """
+    if not hasattr(env, "object") or env.object is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    quat = env.object.data.root_quat_w
+    # Project world +Z into object frame: yields the gravity direction in object frame.
+    g_obj = math_utils.quat_apply(
+        quat, torch.tensor([0.0, 0.0, -1.0], device=env.device).expand(env.num_envs, 3)
+    )
+    xy_norm = torch.norm(g_obj[:, :2], dim=-1)
+    reward = torch.exp(-(xy_norm ** 2) / (tilt_scale ** 2))
+    if use_gate:
+        reward = reward * episode_progress_gate(env, threshold=gate_threshold)
+    return reward
+
+
+def object_not_dropping(
+    env: "BaseEnv | DexEnv",
+    z_threshold: float = 0.55,
+    terminate_threshold: float = 0.20,
+    gate_threshold: float = 200.0,
+    use_gate: bool = True,
+) -> torch.Tensor:
+    """Soft reward for keeping the carried object above a height floor.
+
+    P0.4 (carry-task fix):
+      * The reward is now a smooth Gaussian: ``exp(-(z_thr - z).clamp(min=0) * 5)``.
+        It peaks at 1.0 when ``z >= z_thr`` and decays continuously toward 0
+        as the cube drops, replacing the previous hard 0/1 step.
+      * The reward function no longer mutates ``env.reset_buf`` (separation of
+        concerns: rewards give gradient, ``check_reset()`` decides termination).
+        Instead it stashes a per-env "carry dropped" flag on
+        ``env._carry_dropped_buf`` which :class:`TienKungCarryEnv` then OR's
+        into ``reset_buf`` in its ``reset()`` hook. This keeps the
+        cube-drop termination visible to TensorBoard through the normal
+        ``Episode_Termination/*`` channels.
+      * ``z_threshold`` and ``terminate_threshold`` are decoupled; the latter
+        is now the *soft* floor at which the env will be reset on the next
+        step.
+      * ``use_gate`` lets the carry cfg turn the gate off for raw-signal
+        validation (mirrors :func:`keep_object_in_hand`).
+
+    Args:
+        env: The environment instance.
+        z_threshold: World-frame z above which the object is fully "held" (reward = 1).
+        terminate_threshold: World-frame z below which the env is force-reset on
+            the next step (recorded in ``env._carry_dropped_buf``).
+        gate_threshold: Episode-progress threshold before the reward activates.
+        use_gate: When False, the episode_progress_gate is skipped (raw reward only).
+    """
+    if not hasattr(env, "object") or env.object is None:
+        return torch.zeros(env.num_envs, device=env.device)
+    z = env.object.data.root_pos_w[:, 2]
+    # Soft reward: 1.0 at z >= z_threshold, decays continuously below.
+    reward = torch.exp(-((z_threshold - z).clamp(min=0.0)) * 5.0)
+    # Mark "carry dropped" on the env so the reset hook can OR it into
+    # ``reset_buf``. We never touch ``env.reset_buf`` here directly.
+    if not hasattr(env, "_carry_dropped_buf"):
+        env._carry_dropped_buf = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    env._carry_dropped_buf = (z < terminate_threshold)
+    if use_gate:
+        reward = reward * episode_progress_gate(env, threshold=gate_threshold)
+    return reward
+
+
+def arm_pose_l1(
+    env: "BaseEnv | DexEnv",
+    target_q_l: torch.Tensor | None = None,
+    target_q_r: torch.Tensor | None = None,
+    use_default_if_none: bool = True,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Carry-pose reward: pull the 8 arm joints toward target joint positions.
+
+    P0.5 (carry-task addition): the inherited :func:`joint_deviation_l1`
+    always uses the *default* joint pose (arms hanging at the sides) as the
+    target, which directly fights the carry task (which needs the shoulders
+    pitched forward and the elbows bent into a U-shape). This reward instead
+    lets the user supply a *carry-specific* target — for P0 we default to the
+    robot's default joint positions (so the reward is initially a no-op while
+    we verify the rest of the pipeline); P3.2 will replace the target with
+    the result of an offline IK calibration that solves for the joint angles
+    putting both hands at the carry frame.
+
+    The joint order expected (8 joints total, must be in this order):
+
+        [*_shoulder_pitch_*_joint, *_shoulder_roll_*_joint,
+         *_shoulder_yaw_*_joint,   *_elbow_pitch_*_joint]  for both l and r
+
+    Convention used by the carry cfg: first 4 are left, last 4 are right.
+    The 8 names are passed in via ``asset_cfg.joint_names`` in the carry cfg.
+
+    Returns ``-sum(|q - q_target|)`` (always non-positive; weight the cfg
+    accordingly). The ``zero_flag`` from :func:`joint_deviation_l1` is
+    intentionally NOT inherited: we want the carry pose to be active even
+    while the robot stands in place (it must hold the cube in the carry
+    frame regardless of command).
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    q = asset.data.joint_pos
+    ids = asset_cfg.joint_ids
+    if ids is None or len(ids) != 8:
+        # Misconfigured asset_cfg; the reward manager should have caught this
+        # at resolve time. Return zeros so the training run does not crash.
+        return torch.zeros(env.num_envs, device=env.device)
+
+    if use_default_if_none or target_q_l is None:
+        target_l = asset.data.default_joint_pos[:, ids[:4]]
+    else:
+        # ``target_q_l`` is shape [4]; broadcast to [num_envs, 4].
+        target_l = target_q_l.to(env.device).expand(env.num_envs, 4)
+    if use_default_if_none or target_q_r is None:
+        target_r = asset.data.default_joint_pos[:, ids[4:]]
+    else:
+        target_r = target_q_r.to(env.device).expand(env.num_envs, 4)
+
+    err_l = q[:, ids[:4]] - target_l
+    err_r = q[:, ids[4:]] - target_r
+    return -(torch.sum(torch.abs(err_l), dim=1) + torch.sum(torch.abs(err_r), dim=1))
 

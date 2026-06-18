@@ -50,6 +50,11 @@ class BaseSceneCfg:
     max_episode_length_s: float = 20.0
     num_envs: int = 4096
     env_spacing: float = 2.5
+    # Injected by entry-point scripts (train.py / play.py / play_amp_animation.py)
+    # via `env_cfg.scene.seed = agent_cfg.seed` before env construction. Declared
+    # here so the type checker can see it; the default is only used if no entry
+    # point overrides it.
+    seed: int = 42
     robot: ArticulationCfg = MISSING
     terrain_type: str = MISSING
     terrain_generator: TerrainGeneratorCfg = None
@@ -57,6 +62,11 @@ class BaseSceneCfg:
     height_scanner: HeightScannerCfg = HeightScannerCfg()
     lidar: LidarCfg = LidarCfg()
     depth_camera: TiledCameraCfg = TiledCameraCfg()
+    # Carry-task extension (used by lite_carry). Defaults are safe for non-carry tasks
+    # because SceneCfg only registers the RigidObject when enable_object=True.
+    enable_object: bool = False
+    default_carry_mass: float = 1.0
+    carry_mass_max: float = 10.0
 
 
 @configclass
